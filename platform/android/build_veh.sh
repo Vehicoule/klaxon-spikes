@@ -24,16 +24,19 @@ export ANDROID_SDK_ROOT="$ANDROID_HOME"
 # ReleaseSmall pour le shipping (objet 1,2 Mo vs 6,7 en ReleaseFast —
 # BUILD-PROFILE.md) ; VEH_OPT=ReleaseFast pour les builds de bench.
 VEH_OPT="${VEH_OPT:-ReleaseSmall}"
-echo "[zig] vehicoule/main.zig -> vehicoule.o (x86_64-linux-android.31, $VEH_OPT)"
-"$ZIG" build-obj -O "$VEH_OPT" -fPIC -lc -fno-stack-check \
-    -target x86_64-linux-android.31 \
-    --dep klaxon --dep ph_runtime \
-    -Mroot="$SRC/zig/vehicoule/main.zig" \
-    -Mklaxon="$SRC/zig/klaxon/klaxon.zig" \
-    -Mph_runtime="$SRC/ph/runtime.zig" \
-    --name vehicoule \
-    -femit-bin="$SRC/vehicoule.o" 2>&1 | sed 's/^/[zig] /'
-ls -la "$SRC/vehicoule.o"
+for spec in "x86_64-linux-android.31:vehicoule-x64.o" "aarch64-linux-android.31:vehicoule-arm64.o"; do
+    tgt="${spec%%:*}"; obj="${spec##*:}"
+    echo "[zig] vehicoule/main.zig -> $obj ($tgt, $VEH_OPT)"
+    "$ZIG" build-obj -O "$VEH_OPT" -fPIC -lc -fno-stack-check \
+        -target "$tgt" \
+        --dep klaxon --dep ph_runtime \
+        -Mroot="$SRC/zig/vehicoule/main.zig" \
+        -Mklaxon="$SRC/zig/klaxon/klaxon.zig" \
+        -Mph_runtime="$SRC/ph/runtime.zig" \
+        --name vehicoule \
+        -femit-bin="$SRC/$obj" 2>&1 | sed 's/^/[zig] /'
+    ls -la "$SRC/$obj"
+done
 
 echo "[gradle] assembleDebug (KX_SKIA_OUT=$KX_SKIA_OUT)"
 cd "$PROJ"

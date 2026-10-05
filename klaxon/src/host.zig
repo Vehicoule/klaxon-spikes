@@ -262,7 +262,7 @@ pub const Host = struct {
                        builtin.os.tag == .linux)) return;
         a11y_action_cb = cb;
         a11y_action_ctx = ctx;
-        if (comptime builtin.os.tag == .linux) {
+        if (comptime builtin.os.tag == .linux and !is_android) {
             // Linux : provider AT-SPI global (pas de view — sd-bus).
             if (cb != null)
                 kx.kx_a11y_set_action_handler(null, a11yActionTrampoline, null)
@@ -361,7 +361,7 @@ pub const Host = struct {
     pub fn step(self: *Host, draw: *const fn (*Host) void,
                 on_event: ?*const fn (Event) void, wait_ms: c_int) Step {
         if (self.minimized) { self.stats.minimized_iters += 1; sdl.SDL_Delay(16); return .idle; }
-        if (comptime builtin.os.tag == .linux) {
+        if (comptime builtin.os.tag == .linux and builtin.abi != .android) {
             // AT-SPI : draine les requêtes D-Bus du provider (les ATs nous
             // appellent à tout moment — pas d'attente, juste un pump).
             _ = kx.kx_a11y_pump();

@@ -67,6 +67,11 @@ for g in th["gates"]:
     if not src:
         continue
     m = g["metric"]
+    if m == "apk_mb":
+        # gate fichier-APK : évaluée par device.sh, pas de runtime local
+        results.append({"scene": g["scene"], "status": "SKIPPED",
+                        "reason": "gate APK — gates/device.sh", "artifact_sha256": veh_sha})
+        continue
     v = cold_median if g["scene"] == "gallery-cold" else src.get(m)
     ok = {"<": lambda: v < g["value"], "<=": lambda: v <= g["value"],
           ">": lambda: v > g["value"], ">=": lambda: v >= g["value"],

@@ -592,3 +592,16 @@ build_vehicoule_ios.sh + fix ROOT ../..).
 
 Gate `vehicoule-apk-size` ajoutée (<25 Mo provisoire ; cible ~9-11 Mo —
 BUILD-PROFILE.md) mesurée par device.sh.
+
+## 2026-10-05 — V1 : APK dual-ABI arm64+x86 signé (enfant Android)
+- `vehicoule-v1-arm64.apk` 29,4 Mo, sdk31, native-code arm64-v8a+x86_64,
+  même cert `0301d4a0…`. libmain arm64 **8,59 Mo** (gc-sections→icf→RS+Oz).
+- e2e APK cold **≈33 s** : zig 3,4 + décodeurs 5,7 + link 0,2 + gradle 29,1 + signe 0,37.
+- Merge canonique : host.zig AT-SPI `abi!=.android` (os.tag=.linux est vrai
+  sur Android — cassait les 2 ABI), KXD_NO_FFMPEG étendu `__ANDROID__`
+  (SELinux execve API29+), CMakeLists per-ABI -Oz gc/icf, build_veh 2 ABI.
+- arm64 = NON EXÉCUTÉ (pas d'image système arm64 hôte x86) ; x86_64 exécuté
+  sur kx36 : install signé, autoplay fed:208896, media_cmds:2.
+- Pièges consignés : assembleDebug sans -PBUILD_WITH_CMAKE = APK sans
+  libmain ; abiFilters exige purge intermediates/cxx+.cxx.
+- Gates locales : 8 PASS + apk-size SKIPPED (évaluée par device.sh).

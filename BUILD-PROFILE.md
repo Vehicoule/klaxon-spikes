@@ -40,8 +40,27 @@ release ~1-3 min, gradle RN ~1-5 min, Qt androiddeployqt minutes —
 notre e2e complet est **~15-60× plus court** que le cycle release
 d'un framework lourd, et il n'est plus dominé par le code vendored.
 
-APK arm64 : temps par étape à mesurer chez l'enfant (zig obj, NDK
-décodeurs, link .so, gradle, signe) — à consigner ici quand livré.
+### 2bis. Pipeline APK arm64 — mesuré (enfant Android, NDK r28c clang19)
+
+| Étape | wall |
+|---|---|
+| zig build-obj aarch64 (ReleaseSmall) | 3,4 s |
+| décodeurs vendored — 145 obj clang NDK | 5,7 s (parallèle) |
+| link libmain.so | 0,2 s |
+| gradle assembleDebug complet 2-ABI (SDL3+glue+dex+package) | 29,1 s |
+| apksigner | 0,37 s |
+| **e2e APK cold** | **≈ 33 s** |
+
+Taille libmain arm64 : 22,1 Mo unstripped → **8,59 Mo** dans l'APK
+(trajectoire mesurée : --gc-sections 12,8→9,85 ; ReleaseSmall 6,5→1,2 ;
+-Oz ; --icf=all 9,85→8,59). `.eh_frame` résiduel = objets Skia .a
+précompilés — sous 8 strict demanderait un rebuild Skia allégé ou
+skunicode_icu en option. APK dual-ABI signé : **29,4 Mo**, cert SHA-256
+`0301d4a0…1a87`, sdkVersion 31, native-code arm64-v8a+x86_64.
+
+arm64 = NON EXÉCUTÉ (pas d'image système arm64 sur hôte x86 — émulateur
+arm-on-x86 impraticable ; preuves statiques : ELF64 AArch64, exports JNI).
+x86_64 exécuté : install signé, autoplay `fed:208896`, media_cmds:2.
 
 ## 2. Composition du .so Android — mesuré (APK x86_64 actuel)
 

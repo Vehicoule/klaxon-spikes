@@ -26,6 +26,11 @@
 #define KXD_NO_FFMPEG 1
 #endif
 #endif
+// Android : SELinux interdit execve hors sandbox app (API>=29) — refus
+// honnête identique.
+#if defined(__ANDROID__) && !defined(KXD_NO_FFMPEG)
+#define KXD_NO_FFMPEG 1
+#endif
 
 typedef enum { KXD_MP3, KXD_FLAC, KXD_WAV, KXD_VORBIS, KXD_OPUS, KXD_FFMPEG } kxd_kind;
 
