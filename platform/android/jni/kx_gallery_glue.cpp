@@ -15,9 +15,12 @@
 #include <jni.h>
 #include <cstring>
 
-extern "C" int kx_gallery_main(int argc, char* argv[]);
+#ifndef KX_MAIN_SYM
+#define KX_MAIN_SYM kx_gallery_main
+#endif
+extern "C" int KX_MAIN_SYM(int argc, char* argv[]);
 
-int SDL_main(int argc, char* argv[]) { return kx_gallery_main(argc, argv); }
+int SDL_main(int argc, char* argv[]) { return KX_MAIN_SYM(argc, argv); }
 
 extern "C" {
 

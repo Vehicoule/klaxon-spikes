@@ -29,6 +29,9 @@ const is_android = builtin.abi == .android;
 extern fn kx_media_set_action_handler(cb: *const fn (?*anyopaque, c_int, i64) callconv(.c) void, ctx: ?*anyopaque) void;
 extern fn kx_media_publish_state(state: c_int, pos_us: i64, speed: f64, dur_us: i64) void;
 extern fn kx_media_publish_meta(title: [*:0]const u8, artist: [*:0]const u8, dur_ms: i64) void;
+extern fn fopen(path: [*:0]const u8, mode: [*:0]const u8) ?*anyopaque;
+extern fn fwrite(ptr: [*]const u8, size: usize, n: usize, f: ?*anyopaque) usize;
+extern fn fclose(f: ?*anyopaque) c_int;
 
 // actions figées côté glue : 0 play,1 pause,2 next,3 prev,4 seek(µs),5 stop.
 // Le cb tourne sur le thread JNI → on ne fait qu'enregistrer un pending,
@@ -179,6 +182,10 @@ fn scanWorker() void {
     g.scanning.store(true, .release);
     defer g.scan_done.store(true, .release);
     defer g.scanning.store(false, .release);
+    if (comptime is_android) { // V1 : WAMR-NDK non porté — scan natif même JSON
+        scanNative();
+        return;
+    }
     natives.setup(g.alloc, g.io);
     runtime.init() catch {
         g.scan_err = "runtime init failed";
@@ -261,6 +268,35 @@ fn parseTracks(json: []u8) void {
     }
     if (g.queue.len() == 0 and g.scan_err == null)
         g.scan_err = "aucune piste trouvée";
+}
+
+/// V1 Android : énumère g.music_dir et émet le même JSON {"tracks":[...]}
+/// que scanner.wasm → parseTracks inchangé. WAMR-NDK = suite V1 documentée.
+fn scanNative() void {
+    var dir = (if (g.music_dir.len > 0 and g.music_dir[0] == '/')
+        std.Io.Dir.openDirAbsolute(g.io, g.music_dir, .{ .iterate = true })
+    else
+        std.Io.Dir.cwd().openDir(g.io, g.music_dir, .{ .iterate = true })) catch {
+        g.scan_err = "dir introuvable";
+        return;
+    };
+    defer dir.close(g.io);
+    var json: std.ArrayList(u8) = .empty;
+    json.appendSlice(g.alloc, "{\"tracks\":[") catch { g.scan_err = "oom"; return; };
+    var it = dir.iterate();
+    var first = true;
+    while (it.next(g.io) catch null) |e| {
+        if (e.kind != .file) continue;
+        const path = std.fmt.allocPrint(g.alloc, "{s}/{s}", .{ g.music_dir, e.name }) catch continue;
+        defer g.alloc.free(path);
+        const st = dir.statFile(g.io, e.name, .{}) catch continue;
+        if (!first) json.append(g.alloc, ',') catch return;
+        first = false;
+        json.print(g.alloc, "{{\"title\":\"{s}\",\"path\":\"{s}\",\"size\":{}}}", .{ e.name, path, st.size }) catch return;
+    }
+    json.appendSlice(g.alloc, "]}") catch return;
+    const bytes = json.toOwnedSlice(g.alloc) catch { g.scan_err = "oom"; return; };
+    parseTracks(bytes);
 }
 
 // ---------------------------------------------------------------------------
@@ -519,8 +555,8 @@ fn tick() void {
             if (g.queue.current()) |it| {
                 var tb: [256]u8 = undefined;
                 var nb: [256]u8 = undefined;
-                const t = std.fmt.bufPrintZ(&tb, "{s}", .{it.title}) catch "";
-                const a = std.fmt.bufPrintZ(&nb, "Vehicoule", .{}) catch "";
+                const t = std.fmt.bufPrintSentinel(&tb, "{s}", .{it.title}, 0) catch "";
+                const a = std.fmt.bufPrintSentinel(&nb, "Vehicoule", .{}, 0) catch "";
                 kx_media_publish_meta(t.ptr, a.ptr, @intCast(@divTrunc(g.engine.durationUs(), 1000)));
             }
         }
@@ -731,9 +767,12 @@ fn runApp(init: std.process.Init) !void {
             }
         }
     }
-    const font_data = try std.Io.Dir.cwd().readFileAlloc(g.io,
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", init.gpa, .limited(8 << 20));
-    defer init.gpa.free(font_data);
+    const font_data = if (comptime is_android)
+        @embedFile("DejaVuSans.ttf")
+    else
+        try std.Io.Dir.cwd().readFileAlloc(g.io,
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", init.gpa, .limited(8 << 20));
+    defer if (comptime !is_android) init.gpa.free(font_data);
     try setup(font_data);
     g.engine.subscribe(.{ .ctx = null, .cb = onMediaEvent });
 
@@ -757,6 +796,12 @@ fn runApp(init: std.process.Init) !void {
            g.engine.fed_frames, g.engine.queuedBytes(), g.media_cmds,
            @as(f64, @floatFromInt(k.Stats.peakRssKb())) / 1024.0 }) catch "";
     std.debug.print("{s}", .{line});
+    if (comptime is_android) { // stderr invisible → stats via fichier (cf. k4)
+        if (fopen("/data/data/org.libsdl.app/files/vehicoule.json", "w")) |f| {
+            _ = fwrite(line.ptr, 1, line.len, f);
+            _ = fclose(f);
+        }
+    }
     g.engine.close();
     if (g.scan_json) |sj| g.alloc.free(sj);
     g.queue.deinit(g.alloc);
@@ -765,13 +810,45 @@ fn runApp(init: std.process.Init) !void {
         var ts = std.os.linux.timespec{ .sec = 0, .nsec = 1_000_000 };
         _ = std.os.linux.nanosleep(&ts, null);
     }
-    if (g.scan_inited.load(.acquire)) {
-        natives.reset();
-        runtime.deinit();
+    if (comptime !is_android) {
+        if (g.scan_inited.load(.acquire)) {
+            natives.reset();
+            runtime.deinit();
+        }
     }
     g.host.deinit();
 }
 
 pub fn main(init: std.process.Init) !void {
     return runApp(init);
+}
+
+// ---- Entrée Android : SDLActivity → SDL_main → kx_vehicoule_main ----------
+export fn kx_vehicoule_main(argc: c_int, argv: ?[*:null]?[*:0]u8) c_int {
+    if (comptime !is_android) return -1;
+    var argv_buf: [64][*:0]const u8 = undefined;
+    const n: usize = @min(@as(usize, @intCast(@max(0, argc))), 64);
+    const av = argv orelse return -1;
+    for (0..n) |i| argv_buf[i] = av[i] orelse "vehicoule";
+    const args: []const [*:0]const u8 = argv_buf[0..n];
+    var arena_state = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    const gpa = std.heap.c_allocator;
+    var threaded: std.Io.Threaded = .init(gpa, .{
+        .argv0 = .init(.{ .vector = args }),
+        .environ = .empty,
+    });
+    var environ_map = std.process.Environ.createMap(.empty, gpa) catch return -2;
+    const init: std.process.Init = .{
+        .minimal = .{ .args = .{ .vector = args }, .environ = .empty },
+        .arena = &arena_state,
+        .gpa = gpa,
+        .io = threaded.io(),
+        .environ_map = &environ_map,
+        .preopens = .empty,
+    };
+    runApp(init) catch |e| {
+        std.debug.print("kx_vehicoule_main error: {s}\n", .{@errorName(e)});
+        return -3;
+    };
+    return 0;
 }

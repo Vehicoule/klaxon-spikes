@@ -481,3 +481,43 @@ player/ (résidu renommage — supprimé).
   gates tournent, API domaine µs, MediaSession Android branché. V1 peut
   démarrer : APK signé sideload, devices (proxy honnête vs cloud —
   décision user requise), nightly RSS/cold/pacing.
+
+## [V1 amorcé — RSS nightly + APK en vol]
+
+- host.Stats.peakRssKb() via getrusage(maxrss) ; +peak_rss_mb dans les
+  stats JSON gallery/vehicoule ; gates provisoires rss : vehicoule<200Mo
+  (mesuré ~122), gallery<220 (~133) — proxy llvmpipe, budget réel
+  recalibré sur device de référence V1. Gates 8/8 PASS.
+- Enfant Android dispatché : APK Vehicoule (vraie app) buildé + signé
+  keystore debug local (sideload), MediaSession end-to-end sur piste
+  réelle. Trou signalé : scanner.wasm sous WAMR-Android → fallback
+  fixtures embarquées + item V1 explicite si chantier séparé.
+- PENDING user : décision devices physiques (proxy honnête vs Firebase
+  Test Lab/équivalent = approbation + coût) ; flip default branch
+  devin/baseline-import → main.
+
+## [V1 poche — APK Vehicoule sideload PROUVÉ + mergé canonique]
+
+- Enfant Android : APK de la VRAIE app buildé/signé/installé/joue sur
+  émulateur API36 (GLES SwiftShader + AudioTrack émulé, drivers consignés,
+  aucune extrapolation). 8 pistes fixtures jouées en file auto
+  (ogg→flac→oga→opus→mp3→wav×2) — les 5 décodeurs vendored compilent
+  NDK sans patch. fed:270336.
+- MediaSession e2e sur la vraie app : pause/play/seek(2000ms)/skipNext →
+  engine.command() (media_cmds:4) ; meta republiée par piste ; bonus
+  AVRCP Bluetooth consomme la session (même contrat lockscreen/notif).
+- Signature : keystore keytool local → apksigner → adb install OK.
+  Cert SHA-256 0301d4a0…f193b1a87. Keystore privé JAMAIS livré.
+- Mergé canonique : kx_vehicoule_main export (std.process.Init synthétique),
+  scanNative() (JSON identique scanner.wasm — WAMR-NDK documenté trou V1),
+  font @embedFile DejaVuSans.ttf (repo vehicoule/), stats→files/vehicoule.json,
+  teardown+scanWorker gatés comptime !is_android, KX_MAIN_SYM dans glue,
+  CMakeLists-vehicoule.txt + build_veh.sh (staging documenté).
+- Bugs réels absorbés : bufPrintZ n'existe PAS en zig 0.17 (lazy-compile
+  le masquait — gated android) → bufPrintSentinel ; p99 conservé au
+  canonique (le pin enfant était antérieur).
+- **Vérif croisée clé** : zig build-obj -target x86_64-linux-android.31
+  compile le chemin android complet en local — 0 erreur. Le lazy-compile
+  ne peut plus masquer les branches comptime-android.
+- Gates re-run post-merge : 8/8 PASS. APK livré hors repo
+  (work/deliverables/vehicoule-v1.apk, 30 Mio).
