@@ -24,6 +24,35 @@ const MediaSource = media_source.MediaSource;
 
 const TrackCtx = struct { g: *G, index: usize, slot: *ui.Node };
 
+// ---- MediaSession OS (ADR-0005) : Android seul — glue kx_gallery_glue.cpp ----
+const is_android = builtin.abi == .android;
+extern fn kx_media_set_action_handler(cb: *const fn (?*anyopaque, c_int, i64) callconv(.c) void, ctx: ?*anyopaque) void;
+extern fn kx_media_publish_state(state: c_int, pos_us: i64, speed: f64, dur_us: i64) void;
+extern fn kx_media_publish_meta(title: [*:0]const u8, artist: [*:0]const u8, dur_ms: i64) void;
+
+// actions figées côté glue : 0 play,1 pause,2 next,3 prev,4 seek(µs),5 stop.
+// Le cb tourne sur le thread JNI → on ne fait qu'enregistrer un pending,
+// drainé sur le thread SDL dans tick() (même protocole que les actions a11y).
+fn mediaCmdCb(_: ?*anyopaque, action: c_int, arg: i64) callconv(.c) void {
+    g.media_pend_arg.store(arg, .release);
+    g.media_pend_act.store(action, .release);
+    g.host.dirty = true; // réveille WaitEvent
+}
+
+fn mediaStateCode() c_int {
+    return switch (g.engine.state) {
+        .playing => 1,
+        .paused => 2,
+        else => 0,
+    };
+}
+
+fn mediaPublishState() void {
+    if (comptime !is_android) return;
+    kx_media_publish_state(mediaStateCode(), @intCast(g.engine.positionUs()),
+        1.0, @intCast(g.engine.durationUs()));
+}
+
 const G = struct {
     host: k.Host = undefined,
     io: std.Io = undefined,
@@ -75,6 +104,10 @@ const G = struct {
     scan_done: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
     scan_inited: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
     scan_err: ?[]const u8 = null,
+    media_pend_act: std.atomic.Value(i32) = std.atomic.Value(i32).init(-1),
+    media_pend_arg: std.atomic.Value(i64) = std.atomic.Value(i64).init(0),
+    media_pub_track: ?usize = null,
+    media_cmds: usize = 0,
     music_dir: []const u8 = "music-test",
     plugin_path_arg: ?[]const u8 = null, // --plugin explicite ; sinon résolu vs exe
     autoplay: bool = false,
@@ -301,6 +334,11 @@ fn onVol(v: f32, ctx: ?*anyopaque) void {
 /// subscribe() : le moteur pousse les événements — sur err on le montre,
 /// sur tout event on demande un frame (états déjà reflétés dans l'UI).
 fn onMediaEvent(_: ?*anyopaque, ev: media_events.MediaEvent) void {
+    if (comptime is_android) switch (ev) {
+        .state => mediaPublishState(),
+        .position => mediaPublishState(),
+        else => {},
+    };
     switch (ev) {
         .err => |e| g.scan_err = e.msg,
         else => {},
@@ -456,6 +494,36 @@ fn tick() void {
         g.dirty_extra = true;
         g.sem_dirty = true;
         if (g.autoplay) playIndex(0);
+    }
+
+    // MediaSession OS : commandes lockscreen/notif drainées sur thread SDL
+    if (comptime is_android) {
+        const act = g.media_pend_act.swap(-1, .acq_rel);
+        if (act >= 0) {
+            const arg = g.media_pend_arg.load(.acquire);
+            switch (act) {
+                0 => g.engine.command(.play),
+                1 => g.engine.command(.pause),
+                2 => nextTrack(),
+                3 => prevTrack(),
+                4 => g.engine.command(.{ .seek = @intCast(arg) }),
+                5 => g.engine.command(.stop),
+                else => {},
+            }
+            g.media_cmds += 1;
+            g.dirty_extra = true;
+        }
+        // meta Now Playing : piste courante republiée à chaque changement
+        if (g.engine.state == .playing and g.media_pub_track != g.queue.index) {
+            g.media_pub_track = g.queue.index;
+            if (g.queue.current()) |it| {
+                var tb: [256]u8 = undefined;
+                var nb: [256]u8 = undefined;
+                const t = std.fmt.bufPrintZ(&tb, "{s}", .{it.title}) catch "";
+                const a = std.fmt.bufPrintZ(&nb, "Vehicoule", .{}) catch "";
+                kx_media_publish_meta(t.ptr, a.ptr, @intCast(@divTrunc(g.engine.durationUs(), 1000)));
+            }
+        }
     }
 
     // audio : arm stream quand le decode est prêt, puis alimente la file
@@ -635,6 +703,7 @@ fn setup(font_data: []const u8) !void {
                 .children = &.{ &g.header, &g.transport, &g.divider_node,
                                &g.list.host_node, &g.statusbar } };
     g.host.setA11yActionHandler(a11yPress, &g);
+    if (comptime is_android) kx_media_set_action_handler(mediaCmdCb, null);
     // le bouton play est l'action principale → label AT
     g.root.semantics = .{ .label = "Vehicoule" };
 }
@@ -680,12 +749,12 @@ fn runApp(init: std.process.Init) !void {
 
     var sbuf: [640]u8 = undefined;
     const line = std.fmt.bufPrint(&sbuf,
-        "{{\"tool\":\"vehicoule-v0\",\"backend\":\"{s}\",\"driver\":\"{s}\",\"frames\":{},\"avg_ms\":{d:.3},\"p99_ms\":{d:.3},\"first_frame_ms\":{d:.3},\"tracks\":{},\"state\":\"{s}\",\"pos\":{d:.1},\"fed\":{},\"queued\":{}}}\n",
+        "{{\"tool\":\"vehicoule-v0\",\"backend\":\"{s}\",\"driver\":\"{s}\",\"frames\":{},\"avg_ms\":{d:.3},\"p99_ms\":{d:.3},\"first_frame_ms\":{d:.3},\"tracks\":{},\"state\":\"{s}\",\"pos\":{d:.1},\"fed\":{},\"queued\":{},\"media_cmds\":{}}}\n",
         .{ @tagName(g.host.backend()), g.host.driverInfo(),
            g.host.stats.frames, g.host.stats.avgFrameMs(), g.host.stats.p99FrameMs(),
            g.host.stats.first_frame_ms, g.queue.len(),
            @tagName(g.engine.state), @as(f64, @floatFromInt(g.engine.positionUs())) / 1e6,
-           g.engine.fed_frames, g.engine.queuedBytes() }) catch "";
+           g.engine.fed_frames, g.engine.queuedBytes(), g.media_cmds }) catch "";
     std.debug.print("{s}", .{line});
     g.engine.close();
     if (g.scan_json) |sj| g.alloc.free(sj);

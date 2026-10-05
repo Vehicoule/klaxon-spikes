@@ -447,3 +447,37 @@ player/ (résidu renommage — supprimé).
   feed() + une émission à 0 au start (spec V19 honorée — l'union
   existait mais ne tirait jamais). main.zig était déjà 100% sur
   load/command/subscribe. Vérif : playing + fed>0, gates 6/6 PASS.
+
+## [curation + baseline poussée]
+
+- Amends user appliqués : verdicts *.md dedans, `spikes/src/` = repro
+  curée (74 fichiers : apps+shims+scripts+resultats JSON par spike ;
+  deps vendored/builds/fonts/wasm exclus — repro via pins documentés),
+  `.gitignore` encode la politique (out/dist/build/results/caches/
+  *.wasm + exception spikes/src/**/results).
+- Baseline commit b4f61c5 : 431 fichiers / ~13 Mo → poussée sur `main`
+  du repo Vehicoule/Klaxon (vide → commit initial direct, pas de PR).
+  `devin/baseline-import` existe aussi = HEAD par défaut du remote
+  (poussée en premier) — à basculer sur main dans les settings GitHub.
+- Sanity secrets : aucun fichier sensible stagé (hits = identifiants code).
+
+## [K5 MediaSession Android mergé — clôture V0 COMPLÈTE]
+
+- Enfant Android : TransportControls → MediaSession.Callback → JNI →
+  pending → drain SDL → engine prouvé bout-en-bout (media_cmds:7 ; play/
+  pause/next/prev/seek ms→µs/stop). Réserve documentée : keyevent
+  media-button non routé sans MediaButtonReceiver+requestAudioFocus
+  (noté prod) ; debugTransport via extras = même chemin callback.
+- Mergé canonique : KxMediaSession.java (install/release + publishState/
+  publishMeta + debugSeek/debugTransport), SDLActivity (install onCreate,
+  extras debug kx_media_seek/kx_media_tc, release onDestroy), bloc
+  kx_media_* dans kx_gallery_glue.cpp (cb + FindClass publish).
+- vehicoule/main.zig : handler pending atomique drainé tick() →
+  command(.play/.pause/.seek µs/.stop) + next/prevTrack ; publishState
+  sur events state/position ; publishMeta à chaque piste playing ;
+  stats JSON +media_cmds. Tout gaté comptime is_android (zéro émis
+  Linux — build+run vérifiés, gates 6/6 PASS).
+- **Clôture bouclée** : tout format local joue (vendored+ffmpeg OS),
+  gates tournent, API domaine µs, MediaSession Android branché. V1 peut
+  démarrer : APK signé sideload, devices (proxy honnête vs cloud —
+  décision user requise), nightly RSS/cold/pacing.

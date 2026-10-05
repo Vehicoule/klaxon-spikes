@@ -469,6 +469,9 @@ public class SDLActivity extends Activity implements View.OnSystemUiVisibilityCh
         mLayout = new RelativeLayout(this);
         mLayout.addView(mSurface);
 
+        // ADR-0005 : MediaSession OS (lockscreen/notif/boutons média).
+        KxMediaSession.install(this);
+
         // Get our current screen orientation and pass it down.
         SDLActivity.nativeSetNaturalOrientation(SDLActivity.getNaturalOrientation());
         mCurrentRotation = SDLActivity.getCurrentRotation();
@@ -562,6 +565,19 @@ public class SDLActivity extends Activity implements View.OnSystemUiVisibilityCh
             getIntent().putExtra("kx_a11y_action", -1);
             KxA11yProvider.debugPerform(dbg,
                 android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK);
+        }
+        // Pont debug K5 : --el kx_media_seek <ms> → seek via TransportControls
+        // (vrai chemin contrôleur → callback session, idem lockscreen/notif).
+        long seek = getIntent().getLongExtra("kx_media_seek", -1);
+        if (seek >= 0) {
+            getIntent().putExtra("kx_media_seek", -1L);
+            KxMediaSession.debugSeek(seek);
+        }
+        int tc = getIntent().getIntExtra("kx_media_tc", -1);
+        if (tc >= 0) {
+            getIntent().putExtra("kx_media_tc", -1);
+            KxMediaSession.debugTransport(tc,
+                getIntent().getLongExtra("kx_media_arg", 0));
         }
     }
 
@@ -731,6 +747,8 @@ public class SDLActivity extends Activity implements View.OnSystemUiVisibilityCh
         }
 
         SDLActivity.nativeQuit();
+
+        KxMediaSession.release();
 
         super.onDestroy();
     }

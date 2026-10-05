@@ -176,4 +176,53 @@ JNIEXPORT void JNICALL Java_org_libsdl_app_KxA11yProvider_nativePerformAction(
     g_a11y_cb(g_a11y_ctx, it->second, (int)action);
 }
 
+// ---- MediaSession (ADR-0005) : commandes OS → zig ; état/meta zig → Java ----
+// action figée : 0 play,1 pause,2 next,3 prev,4 seek(arg µs),5 stop.
+// Le cb s'exécute sur le thread appelant JNI (binder/UI) — côté zig il ne fait
+// qu'enregistrer un pending drainé sur le thread SDL (pattern a11y identique).
+
+static void (*g_media_cb)(void*, int, long long) = nullptr;
+static void* g_media_ctx = nullptr;
+
+void kx_media_set_action_handler(void (*cb)(void*, int, long long), void* ctx) {
+    g_media_cb = cb;
+    g_media_ctx = ctx;
+}
+
+JNIEXPORT void JNICALL Java_org_libsdl_app_KxMediaSession_nativeMediaCommand(
+    JNIEnv*, jclass, jint action, jlong arg) {
+    if (g_media_cb) g_media_cb(g_media_ctx, (int)action, (long long)arg);
+}
+
+// state : 0 stopped,1 playing,2 paused ; pos/dur en µs ; speed 1.0
+void kx_media_publish_state(int state, long long pos_us, double speed,
+                            long long dur_us) {
+    JNIEnv* env = (JNIEnv*)SDL_GetAndroidJNIEnv();
+    if (!env) return;
+    jclass c = env->FindClass("org/libsdl/app/KxMediaSession");
+    if (!c) { env->ExceptionClear(); return; }
+    jmethodID m = env->GetStaticMethodID(c, "publishState", "(IJDJ)V");
+    if (m) env->CallStaticVoidMethod(c, m, (jint)state, (jlong)pos_us,
+                                   (jdouble)speed, (jlong)dur_us);
+    env->DeleteLocalRef(c);
+}
+
+void kx_media_publish_meta(const char* title, const char* artist,
+                           long long dur_ms) {
+    JNIEnv* env = (JNIEnv*)SDL_GetAndroidJNIEnv();
+    if (!env) return;
+    jclass c = env->FindClass("org/libsdl/app/KxMediaSession");
+    if (!c) { env->ExceptionClear(); return; }
+    jmethodID m = env->GetStaticMethodID(c, "publishMeta",
+                                       "(Ljava/lang/String;Ljava/lang/String;J)V");
+    if (m) {
+        jstring t = env->NewStringUTF(title ? title : "");
+        jstring a = env->NewStringUTF(artist ? artist : "");
+        env->CallStaticVoidMethod(c, m, t, a, (jlong)dur_ms);
+        env->DeleteLocalRef(t);
+        env->DeleteLocalRef(a);
+    }
+    env->DeleteLocalRef(c);
+}
+
 }  // extern "C"
