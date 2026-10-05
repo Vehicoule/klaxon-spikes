@@ -23,11 +23,13 @@ OPINC="-I$V/opus/include -I$V/opus/celt -I$V/opus/silk -I$V/opus/silk/float -I$V
 OFINC="-I$V/ogg/include -I$V/opusfile/include $OPINC"
 OPDEF="-DOPUS_BUILD -DUSE_ALLOCA -DHAVE_ALLOCA_H -DHAVE_LRINT -DHAVE_LRINTF -DHAVE_LROUND -DVAR_ARRAYS"
 
-cc_obj() { # src, extra flags
+NPROC="$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)"
+cc_obj() { # src, extra flags — compilé en parallèle (pool = nproc)
     local s="$1"; shift
     local o="$OUT/obj/$(basename "${s%.*}")_$(echo "$s" | md5sum | cut -c1-6).o"
     if [ ! -f "$o" ] || [ "$s" -nt "$o" ]; then
-        gcc -O2 $* -c "$s" -o "$o"
+        gcc -O2 "$@" -c "$s" -o "$o" &
+        while [ "$(jobs -r | wc -l)" -ge "$NPROC" ]; do wait -n; done
     fi
     OBJS="$OBJS $o"
 }
@@ -53,6 +55,7 @@ for s in $V/opus/src/*.c; do
     cc_obj "$s" $OPDEF $OPINC
 done
 
+wait  # tous les objets décodeurs avant le link zig
 # --- zig --------------------------------------------------------------------
 $ZIG build-exe \
     --dep klaxon --dep ph_runtime \

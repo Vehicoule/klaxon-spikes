@@ -22,6 +22,27 @@ Compromis honnête : ReleaseSmall privilégie la taille à la micro-perf ;
 le garder pour l'app shipping, garder ReleaseFast pour les builds de bench
 où la mesure des gates est l'objet.
 
+### 1bis. Build e2e complet — mesuré (cache froid, cette VM)
+
+`vehicoule/build.sh` complet : 146 objets décodeurs C (`gcc -O2`) +
+zig `build-exe -O fast` + link statique Skia/SDL/WAMR → binaire Linux :
+
+| Étape | avant parallélisation | après |
+|---|---|---|
+| 146 objets décodeurs (gcc -O2) | ~10 s séquentiel | parallèle nproc |
+| zig build-exe + link final | ~5 s | idem |
+| **total e2e mesuré** | **14,7 s** | **4,7 s** |
+
+Lecture : un build natif complet froid en **4,7 s** après
+parallélisation des `cc_obj` (vérifié : binaire fonctionnel, 8 pistes).
+À titre de comparaison publiée (non mesurée ici) : `flutter build apk`
+release ~1-3 min, gradle RN ~1-5 min, Qt androiddeployqt minutes —
+notre e2e complet est **~15-60× plus court** que le cycle release
+d'un framework lourd, et il n'est plus dominé par le code vendored.
+
+APK arm64 : temps par étape à mesurer chez l'enfant (zig obj, NDK
+décodeurs, link .so, gradle, signe) — à consigner ici quand livré.
+
 ## 2. Composition du .so Android — mesuré (APK x86_64 actuel)
 
 `libmain.so` = 13 Mo non strip :
