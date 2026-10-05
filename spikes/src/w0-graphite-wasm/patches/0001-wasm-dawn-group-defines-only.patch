@@ -1,0 +1,31 @@
+diff --git a/third_party/dawn/BUILD.gn b/third_party/dawn/BUILD.gn
+index 187722e..2c315bc 100644
+--- a/third_party/dawn/BUILD.gn
++++ b/third_party/dawn/BUILD.gn
+@@ -154,7 +154,9 @@ config("dawn_api_config") {
+   } else {
+     libs = []
+   }
+-  libs += [ "$root_out_dir/$_dawn_lib_name" ]
++  if (!is_canvaskit) {
++    libs += [ "$root_out_dir/$_dawn_lib_name" ]
++  }
+ 
+   # https://dawn.googlesource.com/dawn/+/647c352f57aa8a4c2666258455158a36c0c385af/src/dawn/native/BUILD.gn#645
+   if (is_mac || is_ios) {
+@@ -318,9 +320,12 @@ config("dawn_defines") {
+ }
+ 
+ group("dawn") {
+-  public_deps = [ ":dawn_cmake" ]
+-
+-  public_configs = [ ":dawn_api_config" ]
++  if (!is_canvaskit) {
++    # Native Dawn is built by CMake and linked in. On wasm the browser owns
++    # WebGPU (emdawnwebgpu), so only the defines below are relevant.
++    public_deps = [ ":dawn_cmake" ]
+ 
++    public_configs = [ ":dawn_api_config" ]
++  }
+   all_dependent_configs = [ ":dawn_defines" ]
+ }

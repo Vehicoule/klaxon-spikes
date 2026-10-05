@@ -1,0 +1,54 @@
+{
+  "mission": "K4 — port UIAccessibility iOS (bridge collectSemantics → UIKit)",
+  "platform": "iOS simulator arm64",
+  "device": "iPhone 17 / iOS 26.5",
+  "driver": "graphite-metal(Apple iOS simulator GPU;sim)",
+  "status": "PASS",
+  "notes_honesty": "Tout exécuté réellement dans le simulateur (pas d'extrapolation device). La vérification VoiceOver réelle dans le sim n'étant pas pilotable depuis l'hôte, preuve = dump programmatique équivalent (accessibilityElements énumérés + accessibilityActivate() appelé → effet côté app prouvé).",
+
+  "contract": {
+    "file": "kx_skia/src/kx_a11y_ios.mm (séparé — pas #if dans le fichier mac, les types diffèrent)",
+    "sync_begin": "kx_a11y_sync_begin(view, scale)",
+    "sync_item": "kx_a11y_sync_item(view, ident, parent_ident, role, label, hint, x,y,w,h, flags)",
+    "sync_end": "kx_a11y_sync_end(view) → 1 si muté",
+    "action": "kx_a11y_set_action_handler(view, cb(ctx,ident,action), ctx)"
+  },
+
+  "verification": {
+    "elements_enumerated": 39,
+    "note_39_not_40": "1 divider (label vide + non focusable + role group) volontairement filtré côté zig — VoiceOver en ferait un stop muet",
+    "order": "DFS top→down — ordre visuel strict (header → toolbar → liste)",
+    "traits_observed": {
+      "header": "0x10000 (UIAccessibilityTraitHeader) — 'Klaxon Gallery'",
+      "button": "0x1 (Button) — 'Ajouter 100 pistes', 'Lignes alternées'",
+      "slider": "0x1000 (Adjustable) — 'Hauteur des pistes'",
+      "textfield": "0x0 (None, isAccessibilityElement=YES) — 'Champ de recherche'",
+      "list_container": "non-élément (accessibilityElementsHidden interne) — 'Lignes (LazyList)' pas dans le dump",
+      "listitem_focusable": "0x1 (Button) — les pistes",
+      "text_static": "0x40 (StaticText) — labels secondaires"
+    },
+    "frames": "points écran (402x… viewport), conversion view→screen via accessibilityFrameInContainerSpace",
+    "mutation_reuse": "même node* → même ident → même UIAccessibilityElement recyclé ; scroll liste → labels '#N' mis à jour en place (prouvé : dump post-scroll montre #14/#15/#16)",
+    "notifications": "ScreenChanged au 1er arbre non vide ; LayoutChanged(+focused) à chaque mutation",
+    "activate_chain": "accessibilityActivate() → cb zig → tap synthétique (down/up au centre des bounds) → onAdd100 exécuté → list_count+100 (prouvé en log)",
+    "string_copy": "UTF-8 copié à sync_item (NSString dès l'appel — la vue ne retient pas les pointeurs zig)"
+  },
+
+  "traps": [
+    "UIAccessibilityElement init interdit → initWithAccessibilityContainer: obligatoire (sinon exception NSInvalidArgumentException)",
+    "ident = node* zig : adresses des slots stables → réutilisation keyed correcte",
+    "bounds÷scale AVANT conversion : zig parle pixels, UIKit attend points",
+    "pas de hit-test custom : iOS gère seul via accessibilityElements (table ordonné)",
+    "container = SDLView (la UIView de SDL_MetalView, pas la UIWindow)",
+    "list container : isAccessibilityElement=NO (annonce pas 'list' — les items seuls suffisent)",
+    "Node.semantics.label = slice zig → copie obligatoire côté C++ (jamais retenir le pointeur)"
+  ],
+
+  "files": {
+    "shim": "kx_skia/src/kx_a11y_ios.mm",
+    "zig": "gallery/main.zig (installA11y, syncA11y, a11yAction, collectSemantics)",
+    "header_diff": "results/k4-ios.diff (kx_skia.h + kx_a11y_ios.mm + retouches zig)",
+    "log": "results/k4final.log",
+    "screenshot": "results/k4-sim.png"
+  }
+}

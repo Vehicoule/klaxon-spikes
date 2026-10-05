@@ -1,0 +1,18 @@
+fonts=8
+{
+ "driver":"raster-cpu",
+ "fonts":8,
+ "scenes":{
+  "s0":{"mae":0.0000,"nw_r":77114,"nw_g":77114,"bench_ms":3.176,"raster_bench_ms":3.176},
+  "s1":{"mae":0.0000,"nw_r":318610,"nw_g":318610,"bench_ms":0.544,"raster_bench_ms":0.544},
+  "s2":{"mae":0.0000,"nw_r":96366,"nw_g":96366,"bench_ms":5.839,"raster_bench_ms":5.839},
+  "s3":{"mae":0.0000,"nw_r":384000,"nw_g":384000,"bench_ms":1.049,"raster_bench_ms":1.049},
+  "s4":{"mae":0.0000,"nw_r":384000,"nw_g":384000,"bench_ms":3.656,"raster_bench_ms":3.656},
+  "s5":{"mae":0.0000,"nw_r":157800,"nw_g":157800,"bench_ms":34.644,"raster_bench_ms":34.644},
+  "s6":{"mae":0.0000,"nw_r":242541,"nw_g":242541,"bench_ms":0.565,"raster_bench_ms":0.565},
+  "s7":{"mae":0.0000,"nw_r":32299,"nw_g":32299,"bench_ms":0.495,"raster_bench_ms":0.495},
+  "s8":{"mae":0.0000,"nw_r":18432,"nw_g":18432,"bench_ms":0.102,"raster_bench_ms":0.102}
+ },
+ "status":"PASS",
+ "first_frame_ms":1685.3
+}

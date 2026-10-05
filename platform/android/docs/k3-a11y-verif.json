@@ -1,0 +1,30 @@
+{
+  "tool": "k3-gallery-android",
+  "mission": "pont TalkBack canonique kx_a11y_sync_* (K3-suite)",
+  "device": "emulator-5554 (API36 x86_64, rendu logiciel)",
+  "backend": "ganesh_gl",
+  "abi": {
+    "sync_begin": "kx_a11y_sync_begin(view, scale) -> KxA11yProvider.onSyncBegin",
+    "sync_item": "kx_a11y_sync_item(view, ident, parent_ident, role, label, hint, x,y,w,h, flags)",
+    "sync_end": "kx_a11y_sync_end(view) -> int mutated",
+    "set_action_handler": "kx_a11y_set_action_handler(view, cb(ctx,ident,action), ctx) action 0=press"
+  },
+  "verif": {
+    "nodes_pushed": 88,
+    "uiautomator_nodes": 93,
+    "talkback_real_calls_logcat": ">1400 (createAccessibilityNodeInfo + performAction ACCESSIBILITY_FOCUS + events)",
+    "action_click_e2e": "performAction(id=10, ACTION_CLICK) -> nativePerformAction -> zig cb -> tap centre -> Piste #0 selected=true + surbrillance violette (139,126,233)",
+    "flags_propagated": "selected=true sur Piste #0 + CheckBox (toggle.on) + SeekBar (slider>0)",
+    "focus_events": "TYPE_VIEW_FOCUSED (type=8) emis sur ACCESSIBILITY_FOCUS + delta focus sync",
+    "mutated_events": "TYPE_WINDOW_CONTENT_CHANGED a chaque sync mutée"
+  },
+  "pieges": [
+    "am start -e = String extra : getIntExtra renvoie -1 -> utiliser --ei",
+    "singleInstance : am start livre a onNewIntent, getIntent() garde l'ancien extra sans setIntent()",
+    "gestes TalkBack non injectables via 'input' (touches/taps bypass TalkBack) -> pont debug debugPerform(id,16) pour e2e; TalkBack reel prouve separement (appels provider + FOCUS)",
+    "#include <unordered_map> interdit dans extern \"C\" -> include en tete de fichier",
+    "methodes file-scope zig : appeler k.host.syncA11y(&h,...), pas h.syncA11y(...)",
+    "TYPE_VIEW_CLEAR_ACCESSIBILITY_FOCUS n'existe pas : TYPE_VIEW_ACCESSIBILITY_FOCUS_CLEARED",
+    "logcat sature par le spam TalkBack (createAccessibilityNodeInfo x1000) -> filtrer tag KX-A11Y"
+  ]
+}

@@ -1,0 +1,67 @@
+{
+  "mission": "K5 — revalidation canon4 iOS : 3 fixes + UIAccessibility end-to-end",
+  "platform": "iOS simulator arm64",
+  "device": "iPhone 17 / iOS 26.5",
+  "driver": "graphite-metal(Apple iOS simulator GPU)",
+  "canon": "klaxon-canon4.tar.gz (signatures ident void* keyed (uint64_t)(uintptr_t), retours int)",
+  "status": "PASS",
+
+  "fixes_verified": {
+    "window_mapped_gate": {
+      "fix": "sonde kx_ios_window_mapped + warmup dirty jusqu'à map+200ms",
+      "evidence": "rendu visible dès le boot sans intervention (screenshot k5-boot.png) — régression noire absente",
+      "status": "PASS"
+    },
+    "ptr_scale": {
+      "fix": "translate(ev, ptr_scale) multiplie x/y par scale=3.0 sur tous les events pointeur",
+      "evidence": "tap réel mac→sim à (530,500) desktop → 'Piste #30' sélectionnée (surbrillance + trait 0x48 au dump) — un décalage ×3 aurait tapé ~3× plus bas ou raté",
+      "status": "PASS"
+    },
+    "textinputarea_div_scale": {
+      "fix": "onFieldFocus passe bounds÷scale (points) à SDL_SetTextInputArea",
+      "evidence": "[tfarea] bounds px=(428,70,768,36) scale=3.0 → rect pt=(142,23,256,12) — ÷3 exact, identique au frame a11y",
+      "status": "PASS"
+    }
+  },
+
+  "a11y_e2e": {
+    "elements": 97,
+    "order": "DFS top→down (ordre visuel)",
+    "traits": {
+      "0x10000": "Header (Klaxon Gallery)",
+      "0x1": "Button (Ajouter 100 pistes, Lignes alternées)",
+      "0x1000": "Adjustable (Hauteur des pistes)",
+      "0x0+element": "textfield (Champ de recherche)",
+      "0x40": "StaticText (pistes, labels)",
+      "0x48": "StaticText|Selected (Piste #30 après tap réel)",
+      "non-element": "containers list/group (Bibliothèque)"
+    },
+    "mutation": "même ident (0x10…) recyclé ; labels/traits mis à jour en place (SELECTED post-tap)",
+    "activate_chain": "kx_a11y_debug_dump → accessibilityActivate() 'Ajouter 100 pistes' → cb zig a11yPress → pointer_down/up synthétiques → onAdd100 → items=10100 (vs 10000) — PROUVÉ par le JSON bench",
+    "voiceover_note": "VoiceOver sim non pilotable depuis l'hôte → fallback contractuel = dump programmatique (même chemin que VoiceOver emprunte)"
+  },
+
+  "bench": {
+    "frames": 400,
+    "avg_frame_ms": 12.171,
+    "first_frame_ms": 17.438,
+    "materializations": 45,
+    "max_slots_used": 45,
+    "items": 10100,
+    "note": "bench force le dessin continu (--frames) ; gallery canonique plus dense (97 él. a11y). Sim GPU paravirt — non extrapolable device."
+  },
+
+  "retouches_locales_vs_canon4": {
+    "ui.zig": "dupeZ → dupeSentinel(u8,s,0) — API renommée zig 0.17 (portabilité, même sémantique)",
+    "kx_skia_ios.cpp": "platform file iOS restauré (GL stripé) + bloc fonts canon4 porté : lazy dirty/collection, kx_fonts_family_index, kx_fonts_add_dir (scan .ttf/.otf/.ttc récursif)",
+    "build_gallery_ios.sh": "inchangé (canonisé tel quel)"
+  },
+
+  "files": {
+    "log_dump": "results/k4canon.log (97 éléments, dump périodique)",
+    "log_activate": "results/k4bench2.log (items:10100)",
+    "log_tfarea": "results/k4tf2.log (rect pt)",
+    "log_tap": "results/k4tap.log (Piste #30 → 0x48)",
+    "diff": "results/k5-ios.diff"
+  }
+}

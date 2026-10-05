@@ -1,0 +1,18 @@
+fonts=8
+{
+ "driver":"graphite-vulkan(llvmpipe (LLVM 15.0.7, 256 bits))",
+ "fonts":8,
+ "scenes":{
+  "s0":{"mae":0.0757,"nw_r":77114,"nw_g":76896,"bench_ms":13.762,"raster_bench_ms":2.933},
+  "s1":{"mae":0.2189,"nw_r":318610,"nw_g":318540,"bench_ms":3.084,"raster_bench_ms":0.545},
+  "s2":{"mae":3.0558,"nw_r":96366,"nw_g":87537,"bench_ms":5.211,"raster_bench_ms":6.002},
+  "s3":{"mae":0.0006,"nw_r":384000,"nw_g":384000,"bench_ms":2.761,"raster_bench_ms":1.036},
+  "s4":{"mae":0.3884,"nw_r":384000,"nw_g":384000,"bench_ms":1.752,"raster_bench_ms":3.607},
+  "s5":{"mae":0.3801,"nw_r":157800,"nw_g":157518,"bench_ms":133.508,"raster_bench_ms":33.212},
+  "s6":{"mae":0.0970,"nw_r":242541,"nw_g":242496,"bench_ms":3.676,"raster_bench_ms":0.488},
+  "s7":{"mae":0.0219,"nw_r":32299,"nw_g":32230,"bench_ms":2.034,"raster_bench_ms":0.520},
+  "s8":{"mae":4.0738,"nw_r":18432,"nw_g":28672,"bench_ms":6.448,"raster_bench_ms":0.091}
+ },
+ "status":"PASS",
+ "first_frame_ms":8843.2
+}

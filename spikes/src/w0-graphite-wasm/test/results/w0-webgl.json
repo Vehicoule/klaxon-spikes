@@ -1,0 +1,75 @@
+{
+  "status": "PASS",
+  "backend": "webgl",
+  "driver": "ganesh-webgl2(canvas=#canvas)",
+  "scenes": {
+    "s0": {
+      "bench_ms": 3.71,
+      "raster_bench_ms": 17.857,
+      "mae": 0.0703,
+      "nw_r": 77114,
+      "nw_g": 76900
+    },
+    "s1": {
+      "bench_ms": 0.873,
+      "raster_bench_ms": 0.847,
+      "mae": 0.2165,
+      "nw_r": 318659,
+      "nw_g": 318588
+    },
+    "s2": {
+      "bench_ms": 1.553,
+      "raster_bench_ms": 7.217,
+      "mae": 2.9108,
+      "nw_r": 96221,
+      "nw_g": 87626
+    },
+    "s3": {
+      "bench_ms": 0.443,
+      "raster_bench_ms": 11.663,
+      "mae": 0.009,
+      "nw_r": 384000,
+      "nw_g": 384000
+    },
+    "s4": {
+      "bench_ms": 0.197,
+      "raster_bench_ms": 25.87,
+      "mae": 0.2145,
+      "nw_r": 320000,
+      "nw_g": 320000
+    },
+    "s5": {
+      "bench_ms": 1.173,
+      "raster_bench_ms": 191.467,
+      "mae": 0.3771,
+      "nw_r": 157800,
+      "nw_g": 157472
+    },
+    "s6": {
+      "bench_ms": 0.343,
+      "raster_bench_ms": 0.65,
+      "mae": 0.1002,
+      "nw_r": 242540,
+      "nw_g": 242496
+    },
+    "s7": {
+      "bench_ms": 0.7,
+      "raster_bench_ms": 1.06,
+      "mae": 0.022,
+      "nw_r": 32260,
+      "nw_g": 32230
+    },
+    "s8": {
+      "bench_ms": 1.18,
+      "raster_bench_ms": 0.187,
+      "mae": 7.2533,
+      "nw_r": 18432,
+      "nw_g": 18432
+    }
+  },
+  "fonts": 8,
+  "errors": [],
+  "init_ms": 0,
+  "first_frame_ms": 1579.3000000002794,
+  "started": 23
+}

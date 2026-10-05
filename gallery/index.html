@@ -1,0 +1,82 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Klaxon Gallery — wasm</title>
+<style>
+  body { background:#101018; margin:0; display:flex; justify-content:center; padding:24px; }
+  /* SDL3-emscripten sonde le canvas à 1×1 et lit la taille CSS border-box :
+     tout CSS qui l'affecte (border, outline, sizing) fige le buffer à 3×3.
+     Le canvas DOIT rester sans CSS. */
+  #wrap { border:1px solid #333; display:inline-block; line-height:0; position:relative; }
+  /* Pont a11y : DOM invisible positionné sur les bounds canvas (opacity:0
+     reste exposé aux lecteurs d'écran ; pointer-events:none garde les events). */
+  #a11y { position:absolute; left:0; top:0; width:900px; height:700px; pointer-events:none; overflow:hidden; }
+  #a11y div { box-sizing:border-box; }
+  #a11y div:focus { opacity:0.12 !important; outline:2px solid #7c5cff; }
+  #log { position:fixed; bottom:8px; left:8px; color:#888; font:12px monospace; }
+</style>
+</head>
+<body>
+<div id="wrap"><canvas id="canvas" width="900" height="700"></canvas><div id="a11y" aria-hidden="false"></div></div>
+<div id="log">loading…</div>
+<script src="out/wasm/gallery.js"></script>
+<script>
+const log = m => document.getElementById('log').textContent = m;
+const a11yEl = document.getElementById('a11y');
+const dec = new TextDecoder();
+let semCount = 0;
+// Rebuild-avec-réutilisation par index (même forme que kx_a11y.mm : l'ordre
+// DFS est stable → item i reste item i). Le DOM conservé garde le focus
+// clavier entre deux syncs — un rebuild total le perdait à chaque frame.
+let a11yKids = [];
+function syncA11y() {
+  const n = _gallery_semantics_sync();
+  if (!n) return;
+  const ptr = _gallery_semantics_ptr(), len = _gallery_semantics_len();
+  const items = JSON.parse(dec.decode(HEAPU8.subarray(ptr, ptr + len)));
+  // L'élément qui avait le focus avant sync → on le retrouve après.
+  const hadFocus = document.activeElement && a11yEl.contains(document.activeElement)
+      ? a11yKids.indexOf(document.activeElement) : -1;
+  while (a11yKids.length > items.length) a11yKids.pop().remove();
+  for (let i = 0; i < items.length; i++) {
+    const it = items[i];
+    let el = a11yKids[i];
+    if (!el || el.getAttribute('role') !== it.r) {
+      const neu = document.createElement('div');
+      if (el) { el.replaceWith(neu); } else { a11yEl.appendChild(neu); }
+      el = neu;
+      a11yKids[i] = el;
+    }
+    if (el.getAttribute('aria-label') !== (it.l || null)) {
+      if (it.l) el.setAttribute('aria-label', it.l); else el.removeAttribute('aria-label');
+    }
+    el.tabIndex = it.f ? 0 : -1;
+    if (it.d) el.setAttribute('aria-disabled', 'true'); else el.removeAttribute('aria-disabled');
+    const cx = Math.round(it.x + it.w / 2), cy = Math.round(it.y + it.h / 2);
+    el.onclick = ev => { ev.preventDefault(); _gallery_tap(cx, cy); };
+    el.onkeydown = ev => {
+      if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); _gallery_tap(cx, cy); }
+    };
+    // cssText écrase tout le style inline → outline posé APRÈS.
+    el.style.cssText = `position:absolute;left:${it.x}px;top:${it.y}px;width:${it.w}px;height:${it.h}px;opacity:0`;
+    if (it.fo) { el.setAttribute('data-focused', '1'); el.style.outline = '2px solid #00CEC9'; }
+    else { el.removeAttribute('data-focused'); }
+  }
+  if (hadFocus >= 0 && hadFocus < a11yKids.length) a11yKids[hadFocus].focus();
+  semCount = items.length;
+}
+Module.onRuntimeInitialized = () => {
+  const rc = _gallery_init();
+  log(rc === 0 ? "ready — dirty-loop wasm" : "init failed: " + rc);
+  let last = -1;
+  const loop = () => {
+    const f = _gallery_step();
+    if (f !== last) { log("frames: " + f + " · a11y:" + semCount); syncA11y(); last = f; }
+    requestAnimationFrame(loop);
+  };
+  requestAnimationFrame(loop);
+};
+</script>
+</body>
+</html>

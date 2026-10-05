@@ -1,0 +1,670 @@
+--- /tmp/canon4/Klaxon/klaxon/src/ui.zig	2026-10-05 01:46:30
++++ klaxon/src/ui.zig	2026-10-05 02:03:08
+@@ -365,9 +365,9 @@
+         if (it.focused) flags |= kx.A11Y_FOCUSED;
+         if (it.selected) flags |= kx.A11Y_SELECTED;
+         // label/hint : sentinelles requises (le shim copie côté ObjC)
+-        const lz = try alloc.dupeZ(u8, it.label);
++        const lz = try alloc.dupeSentinel(u8, it.label, 0);
+         defer alloc.free(lz);
+-        const hz = try alloc.dupeZ(u8, it.hint);
++        const hz = try alloc.dupeSentinel(u8, it.hint, 0);
+         defer alloc.free(hz);
+         const parent: ?*const anyopaque = if (it.parent) |p| items.items[p].node else null;
+         _ = kx.kx_a11y_sync_item(view, it.node, parent, @intFromEnum(role), lz, hz, it.bounds.x, it.bounds.y, it.bounds.w, it.bounds.h, flags);
+--- /dev/null	2026-10-05 02:11:46
++++ kx_skia/src/kx_skia_ios.cpp	2026-10-05 02:04:25
+@@ -0,0 +1,653 @@
++// kx_skia_ios.cpp — shim C++ Skia pour iOS (device+simulateur arm64).
++// Dérivé de kx_skia_macos.cpp : raster CPU + Graphite Metal.
++// Ganesh GL retiré (GLES iOS deprecated — K0 skip documenté) : le créateur
++// renvoie nullptr ; les chemins CGL/OpenGL sont supprimés.
++// Ajouts vs canonique : kx_ctx_graphite_recorder/kx_ctx_gr_context
++// (déclarés kx_internal.h, utilisés par kx_draw.cpp — absents du tar).
++//
++// Pièges API au pin 8643b1d6 (complètent W0-RESULT.md) :
++//  - Graphite : ContextFactory::MakeMetal(MtlBackendContext{device,queue}) ;
++//    surface offscreen = SkSurfaces::RenderTarget(recorder, info) ;
++//    frame = recorder->snap() + ctx->insertRecording() + ctx->submit().
++//  - Readback Graphite : asyncRescaleAndReadPixels + submit(SyncToCpu::kYes)
++//    (natif : sync autorisé). Ganesh : flush + readPixels direct.
++//  - MtlBackendContext.fDevice/fQueue sont des sk_cfp<CFTypeRef>.
++
++#include "kx_internal.h"
++#include "kx_skia.h"
++
++#include <CoreFoundation/CoreFoundation.h>
++
++#include <cstdlib>
++#include <cstring>
++
++#include "include/core/SkBitmap.h"
++#include "include/core/SkCanvas.h"
++#include "include/core/SkColorSpace.h"
++#include "include/core/SkData.h"
++#include "include/core/SkFontMgr.h"
++#include "include/core/SkImage.h"
++#include "include/core/SkImageInfo.h"
++#include "include/core/SkPixmap.h"
++#include "include/core/SkRefCnt.h"
++#include "include/core/SkStream.h"
++#include "include/core/SkString.h"
++#include "include/core/SkSurface.h"
++#include "include/core/SkTypeface.h"
++#include "include/encode/SkPngEncoder.h"
++#include "include/ports/SkFontMgr_empty.h"
++#include "include/gpu/ganesh/GrDirectContext.h"
++#include "include/gpu/graphite/BackendTexture.h"
++#include "include/gpu/graphite/Context.h"
++#include "include/gpu/graphite/ContextOptions.h"
++#include "include/gpu/graphite/GraphiteTypes.h"
++#include "include/gpu/graphite/Image.h"
++#include "include/gpu/graphite/Recorder.h"
++#include "include/gpu/graphite/Recording.h"
++#include "include/gpu/graphite/Surface.h"
++#include "include/gpu/graphite/mtl/MtlBackendContext.h"
++#include "include/gpu/graphite/mtl/MtlGraphiteTypes_cpp.h"
++#include "modules/skparagraph/include/FontCollection.h"
++
++#include <algorithm>
++#include <chrono>
++#include <cctype>
++#include <memory>
++#include <string>
++#include <vector>
++
++// Helpers ObjC++ (kx_metal.mm) : tout est CFTypeRef/gestion manuelle.
++extern "C" {
++void* kx_mtl_create_device(void);
++void* kx_mtl_create_queue(void* device);           // retained
++const char* kx_mtl_device_name(void* device);      // strdup
++void kx_mtl_release(void*);                        // CFRelease
++}
++
++// ---------------------------------------------------------------------------
++// Fontes : KxFontMgr indexe les typefaces créées via makeFromData et fait le
++// fallback par couverture unicode (W0 : le Custom_Empty ne matche pas).
++// ---------------------------------------------------------------------------
++namespace {
++
++class KxStyleSet final : public SkFontStyleSet {
++public:
++    explicit KxStyleSet(sk_sp<SkTypeface> tf) : f(std::move(tf)) {}
++    int count() override { return 1; }
++    void getStyle(int, SkFontStyle* fs, SkString* name) override {
++        *fs = f->fontStyle();
++        if (name) name->set("");
++    }
++    sk_sp<SkTypeface> createTypeface(int) override { return f; }
++    sk_sp<SkTypeface> matchStyle(const SkFontStyle&) override { return f; }
++
++private:
++    sk_sp<SkTypeface> f;
++};
++
++class KxFontMgr final : public SkFontMgr {
++public:
++    explicit KxFontMgr(sk_sp<SkFontMgr> factory) : fFactory(std::move(factory)) {}
++
++    sk_sp<SkTypeface> add(SkData* data) {
++        sk_sp<SkTypeface> tf = fFactory->makeFromData(sk_ref_sp(data));
++        if (tf) {
++            fFaces.push_back(tf);
++            SkString fam;
++            tf->getFamilyName(&fam);
++            fFamilies.push_back(fam);
++        }
++        return tf;
++    }
++    int countFaces() const { return (int)fFaces.size(); }
++    const std::vector<SkString>& families() const { return fFamilies; }
++
++protected:
++    int onCountFamilies() const override { return (int)fFaces.size(); }
++    void onGetFamilyName(int index, SkString* name) const override {
++        fFaces[SkToSizeT(index)]->getFamilyName(name);
++    }
++    sk_sp<SkFontStyleSet> onCreateStyleSet(int index) const override {
++        return sk_make_sp<KxStyleSet>(fFaces[SkToSizeT(index)]);
++    }
++    sk_sp<SkFontStyleSet> onMatchFamily(const char familyName[]) const override {
++        if (!familyName) return nullptr;
++        for (auto& f : fFaces) {
++            SkString n;
++            f->getFamilyName(&n);
++            if (n.equals(familyName)) return sk_make_sp<KxStyleSet>(f);
++        }
++        return nullptr;
++    }
++    sk_sp<SkTypeface> onMatchFamilyStyle(const char familyName[],
++                                         const SkFontStyle&) const override {
++        if (!familyName) return nullptr;
++        for (auto& f : fFaces) {
++            SkString n;
++            f->getFamilyName(&n);
++            if (n.equals(familyName)) return f;
++        }
++        return nullptr;
++    }
++    sk_sp<SkTypeface> onMatchFamilyStyleCharacter(const char familyName[],
++                                                  const SkFontStyle& style,
++                                                  const char*[], int,
++                                                  SkUnichar ch) const override {
++        if (auto tf = this->onMatchFamilyStyle(familyName, style)) {
++            if (tf->unicharToGlyph(ch)) return tf;
++        }
++        for (auto& f : fFaces) {
++            if (f->unicharToGlyph(ch)) return f;
++        }
++        return nullptr;
++    }
++    sk_sp<SkTypeface> onMakeFromData(sk_sp<SkData> data, int ttcIndex) const override {
++        return fFactory->makeFromData(std::move(data), ttcIndex);
++    }
++    sk_sp<SkTypeface> onMakeFromStreamIndex(std::unique_ptr<SkStreamAsset> s,
++                                            int i) const override {
++        return fFactory->makeFromStream(std::move(s), i);
++    }
++    sk_sp<SkTypeface> onMakeFromStreamArgs(std::unique_ptr<SkStreamAsset> s,
++                                           const SkFontArguments& a) const override {
++        return fFactory->makeFromStream(std::move(s), a);
++    }
++    sk_sp<SkTypeface> onMakeFromFile(const char path[], int ttcIndex) const override {
++        return fFactory->makeFromFile(path, ttcIndex);
++    }
++    sk_sp<SkTypeface> onLegacyMakeTypeface(const char familyName[],
++                                           SkFontStyle style) const override {
++        return fFactory->legacyMakeTypeface(familyName, style);
++    }
++
++private:
++    sk_sp<SkFontMgr> fFactory;
++    std::vector<sk_sp<SkTypeface>> fFaces;
++    std::vector<SkString> fFamilies;
++};
++
++}  // namespace
++
++// ---------------------------------------------------------------------------
++// kx_fonts
++// ---------------------------------------------------------------------------
++struct kx_fonts {
++    sk_sp<KxFontMgr> mgr;
++    sk_sp<skia::textlayout::FontCollection> collection;
++    // Lazy : kx_fonts_add marque dirty, kx_fonts_collection (re)construit une
++    // seule fois au premier usage puis sur mutation (schéma canonique).
++    bool dirty = true;
++};
++
++kx_fonts* kx_fonts_global() {
++    static kx_fonts* g = [] {
++        auto* f = new kx_fonts();
++        f->mgr = sk_make_sp<KxFontMgr>(SkFontMgr_New_Custom_Empty());
++        return f;
++    }();
++    return g;
++}
++
++int kx_fonts_add(kx_fonts* f, const void* data, size_t len) {
++    if (!f || !data || !len) return -1;
++    sk_sp<SkData> d = SkData::MakeWithCopy(data, len);
++    auto tf = f->mgr->add(d.get());
++    if (!tf) return -1;
++    f->dirty = true;
++    return f->mgr->countFaces() - 1;
++}
++
++int kx_fonts_count(const kx_fonts* f) {
++    return f ? f->mgr->countFaces() : 0;
++}
++
++void kx_fonts_free(kx_fonts* f) {
++    if (f && f != kx_fonts_global()) delete f;
++}
++
++int kx_fonts_family_index(const kx_fonts* f, const char* name) {
++    if (!f || !name) return -1;
++    const auto& fams = f->mgr->families();
++    for (size_t i = 0; i < fams.size(); ++i)
++        if (fams[i].equals(name)) return (int)i;
++    return -1;
++}
++
++// Scan récursif .ttf/.otf/.ttc — POSIX (macOS/iOS inclus ; iOS sandbox =
++// les dirs appli uniquement, l'app fournit le chemin du bundle).
++#include <dirent.h>
++#include <sys/stat.h>
++static int fonts_add_dir_rec(kx_fonts* f, const std::string& dir, int depth) {
++    if (depth > 6) return 0;
++    DIR* d = opendir(dir.c_str());
++    if (!d) return 0;
++    std::vector<std::string> files, subs;
++    struct dirent* e;
++    while ((e = readdir(d))) {
++        if (e->d_name[0] == '.') continue;
++        std::string path = dir + "/" + e->d_name;
++        struct stat st;
++        if (stat(path.c_str(), &st)) continue;
++        if (S_ISDIR(st.st_mode)) { subs.push_back(path); continue; }
++        if (!S_ISREG(st.st_mode)) continue;
++        size_t n = strlen(e->d_name);
++        if (n < 4) continue;
++        std::string ext = e->d_name + n - 4;
++        for (auto& c : ext) c = (char)tolower(c);
++        if (ext == ".ttf" || ext == ".otf" || ext == ".ttc")
++            files.push_back(path);
++    }
++    closedir(d);
++    std::sort(files.begin(), files.end());
++    std::sort(subs.begin(), subs.end());
++    int added = 0;
++    for (auto& p : files) {
++        sk_sp<SkData> data = SkData::MakeFromFileName(p.c_str());
++        if (data && kx_fonts_add(f, data->data(), data->size()) >= 0) added++;
++    }
++    for (auto& sub : subs) added += fonts_add_dir_rec(f, sub, depth + 1);
++    return added;
++}
++int kx_fonts_add_dir(kx_fonts* f, const char* path) {
++    if (!f || !path) return -1;
++    return fonts_add_dir_rec(f, path, 0);
++}
++
++// Internes pour kx_scenes.cpp.
++skia::textlayout::FontCollection* kx_fonts_collection(kx_fonts* f) {
++    if (!f) return nullptr;
++    if (f->dirty || !f->collection) {
++        auto fc = sk_make_sp<skia::textlayout::FontCollection>();
++        fc->setDefaultFontManager(f->mgr, f->mgr->families());
++        f->collection = std::move(fc);
++        f->dirty = false;
++    }
++    return f->collection.get();
++}
++const std::vector<SkString>* kx_fonts_families(kx_fonts* f) {
++    return f ? &f->mgr->families() : nullptr;
++}
++
++// ---------------------------------------------------------------------------
++// kx_ctx
++// ---------------------------------------------------------------------------
++struct kx_ctx {
++    kx_backend backend = KX_BACKEND_RASTER;
++    std::string driver = "raster-cpu";
++
++    // Ganesh (non utilisé sous iOS — gardé pour la forme du ctx)
++    sk_sp<GrDirectContext> dctx;
++
++    // Graphite Metal
++    std::unique_ptr<skgpu::graphite::Context> gctx;
++    std::unique_ptr<skgpu::graphite::Recorder> recorder;
++    void* mtl_device = nullptr;  // id<MTLDevice> (CFTypeRef)
++    void* mtl_queue = nullptr;   // id<MTLCommandQueue>
++
++    // Cache image corpus (texture backend ou raster)
++    sk_sp<SkImage> corpus_img;
++    bool corpus_img_tried = false;
++
++    bool submitted_once = false;
++};
++
++kx_ctx* kx_ctx_create_raster() {
++    auto* c = new kx_ctx();
++    c->backend = KX_BACKEND_RASTER;
++    c->driver = "raster-cpu";
++    return c;
++}
++
++// ---- Ganesh GL : absent sous iOS (GLES deprecated) — stubs ABI ----------
++kx_ctx* kx_ctx_create_ganesh_gl(void) { return nullptr; }
++kx_ctx* kx_ctx_create_ganesh_gl_current(kx_gl_getproc) { return nullptr; }
++kx_ctx* kx_ctx_create_ganesh_webgl(const char*) { return nullptr; }
++kx_ctx* kx_ctx_create_graphite_vulkan(void) { return nullptr; }
++kx_ctx* kx_ctx_create_graphite_dawn(void) { return nullptr; }
++kx_ctx* kx_ctx_create_graphite_dawn_d3d12(void) { return nullptr; }
++kx_ctx* kx_ctx_create_graphite_dawn_vulkan(void) { return nullptr; }
++kx_ctx* kx_ctx_create_graphite_webgpu(void) { return nullptr; }
++kx_target* kx_target_onscreen_gl(kx_ctx*, int, int) { return nullptr; }
++kx_target* kx_target_onscreen_dawn(kx_ctx*, void*, int, int) { return nullptr; }
++
++// Internes kx_internal.h (absents du tar canonique — requis par kx_draw.cpp).
++skgpu::graphite::Recorder* kx_ctx_graphite_recorder(kx_ctx* c) {
++    return (c && c->recorder) ? c->recorder.get() : nullptr;
++}
++GrDirectContext* kx_ctx_gr_context(kx_ctx* c) {
++    return (c && c->dctx) ? c->dctx.get() : nullptr;
++}
++
++kx_ctx* kx_ctx_create_graphite_metal() {
++    auto* c = new kx_ctx();
++    c->backend = KX_BACKEND_GRAPHITE_METAL;
++
++    c->mtl_device = kx_mtl_create_device();
++    if (!c->mtl_device) {
++        delete c;
++        return nullptr;
++    }
++    c->mtl_queue = kx_mtl_create_queue(c->mtl_device);
++    if (!c->mtl_queue) {
++        delete c;
++        return nullptr;
++    }
++
++    skgpu::graphite::MtlBackendContext bc;
++    bc.fDevice.reset((CFTypeRef)c->mtl_device);   // prend possession du retain
++    bc.fQueue.reset((CFTypeRef)c->mtl_queue);
++    c->gctx = skgpu::graphite::ContextFactory::MakeMetal(bc, {});
++    if (!c->gctx) {
++        delete c;
++        return nullptr;
++    }
++    c->recorder = c->gctx->makeRecorder();
++
++    char* name = (char*)kx_mtl_device_name(c->mtl_device);
++    c->driver = std::string("graphite-metal(") + (name ? name : "?") + ")";
++    if (name) free(name);
++    return c;
++}
++
++kx_backend kx_ctx_backend(const kx_ctx* c) { return c->backend; }
++
++const char* kx_ctx_driver_info(const kx_ctx* c) {
++    return c ? c->driver.c_str() : "null";
++}
++
++int kx_ctx_has_unfinished_work(kx_ctx* c) {
++    if (!c) return 0;
++    if (c->gctx) return c->gctx->hasUnfinishedGpuWork() ? 1 : 0;
++    return 0;
++}
++
++void kx_ctx_free(kx_ctx* c) {
++    if (!c) return;
++    c->dctx.reset();
++    c->recorder.reset();
++    c->gctx.reset();    // possède device/queue via sk_cfp
++    delete c;
++}
++
++// ---------------------------------------------------------------------------
++// Cibles
++// ---------------------------------------------------------------------------
++kx_target* kx_target_offscreen(kx_ctx* c, int w, int h) {
++    if (!c || w <= 0 || h <= 0) return nullptr;
++    auto* t = new kx_target();
++    t->ctx = c;
++    t->w = w;
++    t->h = h;
++    SkImageInfo info = SkImageInfo::Make(w, h, kRGBA_8888_SkColorType,
++                                       kPremul_SkAlphaType,
++                                       SkColorSpace::MakeSRGB());
++    switch (c->backend) {
++        case KX_BACKEND_RASTER:
++            t->surface = SkSurfaces::Raster(info);
++            break;
++        case KX_BACKEND_GRAPHITE_METAL:
++            t->surface = SkSurfaces::RenderTarget(c->recorder.get(), info);
++            break;
++        default:
++            delete t;
++            return nullptr;
++    }
++    if (!t->surface) {
++        delete t;
++        return nullptr;
++    }
++    return t;
++}
++
++kx_target* kx_target_canvas(kx_ctx*, const char*, int, int) {
++    return nullptr;  // K0 natif : hors scope (bonus CALayer documenté)
++}
++
++// ---------------------------------------------------------------------------
++// Cible onscreen Metal (K1 macOS) : SDL_Metal_CreateView → CAMetalLayer.
++// La SkSurface wrappe le drawable COURANT : acquise à la 1re écriture,
++// relâchée au present (un drawable ne se recycle pas).
++// ---------------------------------------------------------------------------
++kx_target* kx_target_onscreen_metal(kx_ctx* c, void* ca_metal_layer, int w,
++                                    int h, double scale) {
++    if (!c || !ca_metal_layer || c->backend != KX_BACKEND_GRAPHITE_METAL ||
++        w <= 0 || h <= 0)
++        return nullptr;
++    auto* t = new kx_target();
++    t->ctx = c;
++    t->w = w;
++    t->h = h;
++    t->onscreen = true;
++    t->mtl_layer = kx_mtl_layer_configure(ca_metal_layer, c->mtl_device,
++                                        (double)w, (double)h, scale);
++    if (!t->mtl_layer) {
++        delete t;
++        return nullptr;
++    }
++    return t;
++}
++
++// Acquiert un drawable + wrappe sa texture en SkSurface. Idempotent par frame.
++int kx_metal_acquire(kx_target* t) {
++    if (!t || t->surface || !t->mtl_layer) return t && t->surface ? 0 : -1;
++    kx_ctx* c = t->ctx;
++    t->mtl_drawable = kx_mtl_layer_next_drawable(t->mtl_layer);
++    if (!t->mtl_drawable) return -1;  // pool plein — réessayer plus tard
++    void* tex = kx_mtl_drawable_texture(t->mtl_drawable);
++    auto backendTex = skgpu::graphite::BackendTextures::MakeMetal(
++        {t->w, t->h}, (CFTypeRef)tex);
++    t->surface = SkSurfaces::WrapBackendTexture(
++        c->recorder.get(), backendTex, SkColorSpace::MakeSRGB(), nullptr);
++    if (!t->surface) {
++        kx_mtl_release(t->mtl_drawable);
++        t->mtl_drawable = nullptr;
++        return -2;
++    }
++    return 0;
++}
++
++// Present : submit puis presentDrawable, relâche drawable + surface.
++int kx_metal_present(kx_target* t) {
++    if (!t || !t->mtl_layer) return -1;
++    if (!t->mtl_drawable) return 0;  // rien rendu — rien à présenter
++    int rc = kx_flush_target(t->ctx, t);
++    if (rc) {
++        // même en échec de flush on présente (noir) et on libère la frame
++    }
++    kx_ctx* c = t->ctx;
++    kx_mtl_present_drawable(c->mtl_queue, t->mtl_drawable);
++    kx_mtl_release(t->mtl_drawable);
++    t->mtl_drawable = nullptr;
++    t->surface.reset();
++    return rc;
++}
++
++void kx_target_free(kx_target* t) {
++    if (!t) return;
++    t->surface.reset();
++    if (t->mtl_drawable) { kx_mtl_release(t->mtl_drawable); t->mtl_drawable = nullptr; }
++    if (t->mtl_layer) { kx_mtl_release(t->mtl_layer); t->mtl_layer = nullptr; }
++    delete t;
++}
++
++void kx_target_size(const kx_target* t, int* w, int* h) {
++    if (w) *w = t->w;
++    if (h) *h = t->h;
++}
++
++// Flush/submit d'une cible après dessin (le "finalize" du backend).
++int kx_flush_target(kx_ctx* c, kx_target* t) {
++    if (!t || !t->dirty) return 0;
++    (void)c; // c == t->ctx (signature canonique partagée avec kx_skia_linux.cpp)
++    switch (c->backend) {
++        case KX_BACKEND_GRAPHITE_METAL: {
++            std::unique_ptr<skgpu::graphite::Recording> rec = c->recorder->snap();
++            if (!rec) return -1;
++            skgpu::graphite::InsertRecordingInfo info;
++            info.fRecording = rec.get();
++            if (c->gctx->insertRecording(info) != skgpu::graphite::InsertStatus::kSuccess)
++                return -2;
++            if (!c->gctx->submit()) return -3;
++            c->submitted_once = true;
++            break;
++        }
++        default:
++            break;  // raster : rien à faire
++    }
++    t->dirty = false;
++    return 0;
++}
++
++int kx_present(kx_ctx* c, kx_target* t) {
++    if (t && t->mtl_layer && c->backend == KX_BACKEND_GRAPHITE_METAL)
++        return kx_metal_present(t);
++    return kx_flush_target(c, t);
++}
++
++// Hook neutre d'acquisition paresseuse (cv() kx_draw + kx_scenes) : metal
++// onscreen acquiert le drawable à la première écriture de la frame.
++int kx_acquire_surface(kx_target* t) { return kx_metal_acquire(t); }
++
++int kx_graphite_canvas_acquire(kx_target*) { return -1; }  // non utilisé en natif
++
++// ---------------------------------------------------------------------------
++// Image corpus : damier 64×64 déterministe uploadé en texture backend.
++// ---------------------------------------------------------------------------
++static SkBitmap make_corpus_bitmap() {
++    SkBitmap bm;
++    bm.allocPixels(SkImageInfo::Make(64, 64, kRGBA_8888_SkColorType,
++                                     kPremul_SkAlphaType));
++    uint32_t* px = (uint32_t*)bm.getPixels();
++    for (int y = 0; y < 64; ++y)
++        for (int x = 0; x < 64; ++x) {
++            bool alt = ((x >> 3) ^ (y >> 3)) & 1;
++            px[y * 64 + x] = alt ? 0xFF1E88E5 : 0xFFFFB300;
++        }
++    bm.setImmutable();
++    return bm;
++}
++
++sk_sp<SkImage> kx_ctx_corpus_image(kx_ctx* c) {
++    if (c->corpus_img_tried) return c->corpus_img;
++    c->corpus_img_tried = true;
++    SkBitmap bm = make_corpus_bitmap();
++    sk_sp<SkImage> raster = bm.asImage();
++    switch (c->backend) {
++        case KX_BACKEND_GRAPHITE_METAL:
++            c->corpus_img = SkImages::TextureFromImage(c->recorder.get(),
++                                                       raster.get(), {});
++            break;
++        default:
++            c->corpus_img = raster;
++    }
++    return c->corpus_img;
++}
++
++// ---------------------------------------------------------------------------
++// Readback (natif : polling OK / sync autorisé)
++// ---------------------------------------------------------------------------
++struct kx_readback {
++    kx_ctx* ctx;
++    kx_target* target;
++    bool done = false;
++    bool failed = false;
++    std::vector<uint8_t> pixels;
++    size_t row_bytes = 0;
++};
++
++kx_readback* kx_readback_start(kx_ctx* c, kx_target* t) {
++    if (!c || !t || !t->surface) return nullptr;
++    if (t->mtl_layer) return nullptr;  // drawable framebufferOnly : pas de readPixels
++    auto* rb = new kx_readback();
++    rb->ctx = c;
++    rb->target = t;
++    const size_t rbBytes = (size_t)t->w * 4;
++    rb->pixels.resize(rbBytes * t->h);
++    rb->row_bytes = rbBytes;
++    SkImageInfo info = SkImageInfo::Make(t->w, t->h, kRGBA_8888_SkColorType,
++                                         kPremul_SkAlphaType);
++
++    if (kx_flush_target(t->ctx, t)) {
++        rb->failed = true;
++        return rb;
++    }
++
++    switch (c->backend) {
++        case KX_BACKEND_RASTER:
++            if (t->surface->readPixels(info, rb->pixels.data(), rbBytes, 0, 0))
++                rb->done = true;
++            else
++                rb->failed = true;
++            break;
++        case KX_BACKEND_GRAPHITE_METAL: {
++            struct Ctx { kx_readback* rb; size_t rbBytes; int w, h; };
++            auto* ud = new Ctx{rb, rbBytes, t->w, t->h};
++            c->gctx->asyncRescaleAndReadPixels(
++                t->surface.get(), info, SkIRect::MakeWH(t->w, t->h),
++                SkImage::RescaleGamma::kSrc, SkImage::RescaleMode::kNearest,
++                [](SkImage::ReadPixelsContext uc,
++                   std::unique_ptr<const SkImage::AsyncReadResult> res) {
++                    std::unique_ptr<Ctx> ud(reinterpret_cast<Ctx*>(uc));
++                    if (res && res->count() >= 1) {
++                        const uint8_t* src = (const uint8_t*)res->data(0);
++                        size_t srcRb = res->rowBytes(0);
++                        for (int y = 0; y < ud->h; ++y)
++                            memcpy(ud->rb->pixels.data() + y * ud->rbBytes,
++                                   src + y * srcRb, ud->rbBytes);
++                        ud->rb->done = true;
++                    } else {
++                        ud->rb->failed = true;
++                    }
++                },
++                ud);
++            // Natif : sync autorisé — submit bloquant fait le callback.
++            c->gctx->submit(skgpu::graphite::SyncToCpu::kYes);
++            break;
++        }
++        default:
++            rb->failed = true;
++    }
++    return rb;
++}
++
++int kx_readback_poll(kx_ctx*, kx_readback* rb) {
++    if (!rb) return -1;
++    if (rb->failed) return -1;
++    return rb->done ? 1 : 0;
++}
++
++int kx_readback_copy(const kx_readback* rb, uint8_t* dst) {
++    if (!rb || !rb->done) return -1;
++    memcpy(dst, rb->pixels.data(), rb->pixels.size());
++    return (int)rb->pixels.size();
++}
++
++int64_t kx_readback_copy_n(const kx_readback* rb, void* dst, size_t len) {
++    if (!rb || !rb->done || !dst) return -1;
++    size_t n = rb->pixels.size() < len ? rb->pixels.size() : len;
++    memcpy(dst, rb->pixels.data(), n);
++    return (int64_t)n;
++}
++
++void kx_readback_free(kx_readback* rb) { delete rb; }
++
++// ---------------------------------------------------------------------------
++// Bench : iters × (kx_scene_draw + flush/submit + readback) — le "chemin
++// complet" du spec KX (le readback natif inclut la complétion GPU).
++// ---------------------------------------------------------------------------
++double kx_bench_ms(kx_ctx* c, kx_fonts* f, kx_target* t, int scene, int iters) {
++    if (!c || !t || iters <= 0) return -1;
++    auto t0 = std::chrono::steady_clock::now();
++    for (int i = 0; i < iters; ++i) {
++        if (kx_scene_draw(c, f, t, scene, (double)(i % 60) / 60.0)) return -1;
++        if (kx_flush_target(t->ctx, t)) return -1;
++        kx_readback* rb = kx_readback_start(c, t);
++        if (!rb) return -1;
++        int spins = 0;
++        while (kx_readback_poll(c, rb) == 0 && ++spins < 100000)
++            ;
++        kx_readback_free(rb);
++    }
++    auto t1 = std::chrono::steady_clock::now();
++    return std::chrono::duration<double, std::milli>(t1 - t0).count();
++}

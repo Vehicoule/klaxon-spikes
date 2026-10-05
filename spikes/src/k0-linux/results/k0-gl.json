@@ -1,0 +1,18 @@
+fonts=8
+{
+ "driver":"ganesh-gl(llvmpipe (LLVM 15.0.7, 256 bits);Mesa)",
+ "fonts":8,
+ "scenes":{
+  "s0":{"mae":0.0698,"nw_r":77114,"nw_g":76904,"bench_ms":5.401,"raster_bench_ms":2.928},
+  "s1":{"mae":0.2081,"nw_r":318610,"nw_g":318524,"bench_ms":0.434,"raster_bench_ms":0.543},
+  "s2":{"mae":2.8317,"nw_r":96366,"nw_g":87520,"bench_ms":7.919,"raster_bench_ms":5.718},
+  "s3":{"mae":0.0006,"nw_r":384000,"nw_g":384000,"bench_ms":0.628,"raster_bench_ms":1.034},
+  "s4":{"mae":0.0211,"nw_r":384000,"nw_g":384000,"bench_ms":0.088,"raster_bench_ms":3.608},
+  "s5":{"mae":0.3796,"nw_r":157800,"nw_g":157518,"bench_ms":62.236,"raster_bench_ms":30.904},
+  "s6":{"mae":0.1026,"nw_r":242541,"nw_g":242496,"bench_ms":1.580,"raster_bench_ms":0.485},
+  "s7":{"mae":0.0219,"nw_r":32299,"nw_g":32230,"bench_ms":0.508,"raster_bench_ms":0.458},
+  "s8":{"mae":7.2533,"nw_r":18432,"nw_g":18432,"bench_ms":0.816,"raster_bench_ms":0.092}
+ },
+ "status":"PASS",
+ "first_frame_ms":4158.1
+}

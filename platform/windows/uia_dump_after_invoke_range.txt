@@ -1,0 +1,20 @@
+hwnd=0000000000020456
+[  1] Pane     name="Klaxon Gallery" bounds=350,230 900x700 en=1 kf=1 focus=0 aid="kx-0" lct="pane"
+      ProviderDescription=[pid:3676,providerId:0x20456 Main:Nested [pid:5000,providerId:0x20456 Main(parent link):Unidentified Provider (unmanaged:gallery-windows.exe)]; Nonclient:Microsoft: Non-Client Proxy (unmanaged:uiautomationcore.dll); Hwnd(parent link):Microsoft: HWND Proxy (unmanaged:uiautomationcore.dll)]
+      ClassName="SDL_app"
+
+  [  2] ?        name="" bounds=366,202 884x28 en=1 kf=1 focus=0 lct="title bar"
+    [  3] ?        name="System" bounds=350,207 22x22 en=1 kf=1 focus=0 aid="MenuBar" lct="menu bar"
+      [  4] ?        name="System" bounds=350,207 22x22 en=1 kf=1 focus=0 lct="menu item"
+    [  5] Button   name="Minimize" bounds=1111,200 47x30 en=1 kf=0 focus=0 lct="button"
+    [  6] Button   name="Maximize" bounds=1158,200 46x30 en=1 kf=0 focus=0 lct="button"
+    [  7] Button   name="Close" bounds=1204,200 47x30 en=1 kf=0 focus=0 lct="button"
+  [  8] Group    name="Klaxon Gallery" bounds=350,230 900x60 en=1 kf=0 focus=0 aid="kx-1" lct="heading"
+  [  9] Group    name="Disc  aid="kx-3" lct="group"
+  [ 10] Button   name="Ajouter 100 pistes" bounds=416,300 110x36 en=1 kf=1 focus=0 aid="kx-4" lct="button"
+  [ 11] CheckBox name="Lignes alternées" bounds=538,304 56x28 en=1 kf=1 focus=0 aid="kx-5" lct="check box"
+  [ 12] Slider   name="Hauteur des pistes" bounds=606,300 160x36 en=1 kf=1 focus=1 aid="kx-6" lct="slider"
+  [ 13] Edit     name="Champ de recherche" bounds=778,300 462x36 en=1 kf=1 focus=0 aid="kx-7" lct="edit"
+  [ 14] List     name="Bibliothèque" bounds=350,347 900x583 en=1 kf=0 focus=0 aid="kx-8" lct="list"
+    [ 15] ListItem name="Piste #10  sel=0 aid="kx-29" lct="list item"
+{"tool":"kx-uia-dump","hwnd":"0000000000020456","nodes":15}

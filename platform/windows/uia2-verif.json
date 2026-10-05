@@ -1,0 +1,46 @@
+{
+  "spike": "UIA-2-windows",
+  "date": "2026-10-05",
+  "driver": "graphite-dawn-d3d12(Microsoft Basic Render Driver = WARP — rendu logiciel, timings non extrapolables)",
+  "tree": "klaxon-canon4 + patch uia2 (ci-joint)",
+  "hwnd": "0x00020456",
+  "etape1_rebuild_canonique": {
+    "status": "PASS",
+    "nodes": 36,
+    "automation_ids": "kx-N sur les 31 noeuds semantiques (kx-0 racine … kx-30)",
+    "graft": "Main:Nested Unidentified Provider (natif, pas de MSAA proxy)",
+    "preuve": "uia_dump_state0.txt (41 lignes)",
+    "note": "build canonique compile tel quel apres 2 fix zig-0.17 : dupeZ→dupeSentinel (ui.zig), sync_item return 0 (C4715)"
+  },
+  "etape2_actions": {
+    "status": "PASS",
+    "set_action_handler": "kx_a11y_set_action_handler(hwnd, cb, ctx) implemente — handler par bridge + global view=null (pattern android) ; host.setA11yActionHandler gate etendu a .windows via self.hwnd",
+    "select_listitem": {
+      "command": "uia_action.exe --select \"Piste #3\"",
+      "result": "{\"action\":\"--select\",\"aid\":\"kx-15\",\"hr\":\"0x00000000\",\"ok\":1}",
+      "effet": "cb(ctx,ident,0) -> a11yPressRun -> pointer_down/up centre node -> sel=1 sur kx-15 dans uia_dump_after_select.txt ; highlight violet visible uia2_select_piste3_focus_slider.png",
+      "synthetique_remplace": "PostMessage WM_LBUTTON garde en fallback si cb==null"
+    },
+    "invoke_button": {
+      "command": "uia_action.exe --invoke \"Ajouter 100 pistes\"",
+      "result": "{\"action\":\"--invoke\",\"aid\":\"kx-4\",\"hr\":\"0x00000000\",\"ok\":1}"
+    },
+    "rangevalue_slider": {
+      "command": "uia_action.exe --range \"Hauteur\" 80",
+      "result": "{\"action\":\"--range\",\"aid\":\"kx-6\",\"hr\":\"0x00000000\",\"ok\":1}",
+      "delta": "0->80 => action 1 (increment) -> focusSet(node)+SDLK_RIGHT replay",
+      "effet_visible": "slider focus=1 + anneau focus visible (screenshot) ; RangeValue expose min0 max100 small1 large10 IsReadOnly=false"
+    },
+    "patterns": "IInvokeProvider roles {1,2,6}, IRangeValueProvider role==3, ISelectionItemProvider role==6 — exposes via GetPatternProvider/QI",
+    "threading": "cb appele SANS g_mtx tenu (meme principe que le fix WM_GETOBJECT)"
+  },
+  "etape3_clavier_reel": {
+    "status": "PASS",
+    "outil": "send_keys.exe — SendInput USER32 (KEYEVENTF_UNICODE type, VK 8 backspace, click SetCursorPos+MOUSEEVENTF)",
+    "sequence": "--fg -> --click 1009 318 (centre Edit) -> --type \"salut kx\" (8 chars) -> --key 8 x3",
+    "resultat": "champ affiche \"alut kx|\" apres type (le 's' absorbe par la race focus-clic/SDL_StartTextInput — consigne), \"alut|\" apres 3 backspaces",
+    "preuves": ["uia2_typed_text.png", "uia2_after_backspace.png"],
+    "path": "SendInput -> SDL event -> SDL_TEXT_INPUT -> onEvent.text_input -> field.insert"
+  },
+  "verdict": "3/3 etapes PASS — aucune extrapolation, toutes actions rejouent le vrai input path zig"
+}

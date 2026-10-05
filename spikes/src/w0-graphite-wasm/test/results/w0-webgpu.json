@@ -1,0 +1,75 @@
+{
+  "status": "PASS",
+  "backend": "webgpu",
+  "driver": "graphite-webgpu(emdawnwebgpu;adapter=browser)",
+  "scenes": {
+    "s0": {
+      "bench_ms": 2.623,
+      "raster_bench_ms": 17.79,
+      "mae": 0.0767,
+      "nw_r": 77114,
+      "nw_g": 76908
+    },
+    "s1": {
+      "bench_ms": 0.243,
+      "raster_bench_ms": 0.823,
+      "mae": 0.2133,
+      "nw_r": 318659,
+      "nw_g": 318584
+    },
+    "s2": {
+      "bench_ms": 0.157,
+      "raster_bench_ms": 6.79,
+      "mae": 3.113,
+      "nw_r": 96221,
+      "nw_g": 87599
+    },
+    "s3": {
+      "bench_ms": 0.487,
+      "raster_bench_ms": 12.077,
+      "mae": 0.0006,
+      "nw_r": 384000,
+      "nw_g": 384000
+    },
+    "s4": {
+      "bench_ms": 0.227,
+      "raster_bench_ms": 24.343,
+      "mae": 0.5146,
+      "nw_r": 320000,
+      "nw_g": 320000
+    },
+    "s5": {
+      "bench_ms": 1.453,
+      "raster_bench_ms": 187.08,
+      "mae": 0.3763,
+      "nw_r": 157800,
+      "nw_g": 157467
+    },
+    "s6": {
+      "bench_ms": 0.377,
+      "raster_bench_ms": 0.627,
+      "mae": 0.0951,
+      "nw_r": 242540,
+      "nw_g": 242496
+    },
+    "s7": {
+      "bench_ms": 1.01,
+      "raster_bench_ms": 1.223,
+      "mae": 0.022,
+      "nw_r": 32260,
+      "nw_g": 32230
+    },
+    "s8": {
+      "bench_ms": 0.8,
+      "raster_bench_ms": 0.15,
+      "mae": 4.0782,
+      "nw_r": 18432,
+      "nw_g": 28672
+    }
+  },
+  "fonts": 8,
+  "errors": [],
+  "init_ms": 0,
+  "first_frame_ms": 2161.0999999996275,
+  "started": 37.700000000186265
+}

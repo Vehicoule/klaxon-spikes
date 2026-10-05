@@ -1,0 +1,53 @@
+{
+  "comment": "Gates K3 — cibles ADR-0008 mesurées puis bloquantes. Tout chiffre ci-dessous vient d'une mesure réelle sur cette VM ; le driver est consigné dans chaque résultat (llvmpipe = software, jamais extrapolé à du hardware).",
+  "gates": [
+    {
+      "scene": "gallery-scroll-p99",
+      "tool": "k2-gallery",
+      "metric": "p99_frame_ms",
+      "op": "<",
+      "value": 16.7,
+      "reason": "p99 frame < 16,7 ms sur scènes de scroll (ADR-0008)"
+    },
+    {
+      "scene": "gallery-scroll-materializes",
+      "tool": "k2-gallery",
+      "metric": "materializations",
+      "op": ">",
+      "value": 0,
+      "reason": "le scroll injecté matérialise réellement (sinon la scène est creuse)"
+    },
+    {
+      "scene": "gallery-cold",
+      "tool": "k2-gallery",
+      "metric": "first_frame_ms",
+      "op": "<",
+      "value": 200,
+      "reason": "cold start médiane-3 < 200 ms — proxy llvmpipe (VM partagée, échantillons ~95-215ms) ; le seuil ADR-0008 150 ms s'appliquera sur hardware en V1"
+    },
+    {
+      "scene": "gallery-idle",
+      "tool": "k2-gallery",
+      "metric": "frames",
+      "op": "<=",
+      "value": 6,
+      "reason": "au repos : ~0 frame (tolérance startup+resize)"
+    },
+    {
+      "scene": "vehicoule-decode",
+      "tool": "vehicoule-v0",
+      "metric": "fed",
+      "op": ">",
+      "value": 0,
+      "reason": "chaîne audio alimente le device (tous décodeurs vendored)"
+    },
+    {
+      "scene": "vehicoule-ui-p99",
+      "tool": "vehicoule-v0",
+      "metric": "p99_ms",
+      "op": "<",
+      "value": 16.7,
+      "reason": "p99 UI Vehicoule < 16,7 ms"
+    }
+  ]
+}

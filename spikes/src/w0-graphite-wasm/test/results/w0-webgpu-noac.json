@@ -1,0 +1,13 @@
+{
+  "status": "FAIL",
+  "backend": "webgpu",
+  "driver": null,
+  "scenes": {},
+  "fonts": 0,
+  "errors": [
+    "requestAdapter → null"
+  ],
+  "init_ms": 0,
+  "first_frame_ms": 0,
+  "started": 24.200000000186265
+}

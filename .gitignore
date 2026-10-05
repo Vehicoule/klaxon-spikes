@@ -1,0 +1,34 @@
+# Artefacts régénérables — la politique : la source rentre, le build non.
+out/
+dist/
+build/
+.zig-cache/
+zig-out/
+node_modules/
+.dart_tool/
+target/
+
+# Dumps bruts de bench (les verdicts *.md et spikes/src/ restent dans le repo)
+results/
+results-*.jsonl
+
+# Binaires et images produits
+*.wasm
+*.o
+*.a
+*.so
+*.dylib
+*.exe
+
+# Logs et caches
+*.log
+.cache/
+
+# Spikes : seul le dossier de reproduction curé rentre — les workspaces
+# complets (deps vendored + builds) restent dehors.
+spikes/*
+!spikes/src/
+
+# spikes/src/ conserve sa petite evidence (json/png de résultats)
+!spikes/src/**/results/
+!spikes/src/**/results/**

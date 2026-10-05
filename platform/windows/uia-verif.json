@@ -1,0 +1,41 @@
+{
+  "tool": "kx-uia-verif",
+  "platform": "windows-x64",
+  "date": "2026-10-05",
+  "app": "gallery-windows.exe --gpu dawn (backend graphite-dawn-d3d12, driver WARP — rendu logiciel)",
+  "hwnd": "0x150344",
+  "provider_graft": {
+    "evidence": "ProviderDescription=[pid:4324,providerId:0x150344 Main:Nested [pid:3004,providerId:0x150344 Main(parent link):Unidentified Provider (unmanaged:gallery-windows.exe)]; Nonclient:Microsoft: Non-Client Proxy; Hwnd:Microsoft: HWND Proxy]",
+    "verdict": "grafted (no MSAA-proxy fallback)"
+  },
+  "inspectors": {
+    "uia_dump_custom": "37 nodes (1 Pane merged-root + 6 nonclient + 30 semantic), names/bounds/controltypes/flags correct — see uia_dump_state0.txt",
+    "VisualUIAVerifyNative": "Microsoft SDK tool shows full semantic tree under pane \"Klaxon Gallery\" \"kx-0\" — uiaverify_tree.png",
+    "Inspect": "hover hit-test lands on semantic elements (ElementProviderFromPoint → deepest node) — inspect_hover_piste.png (group \"Piste #5\", AutomationId kx-21)"
+  },
+  "tree_state0": {
+    "nodes_semantic": 30,
+    "sample": [
+      {"automationId": "kx-1", "controlType": "Group", "localizedControlType": "heading", "name": "Klaxon Gallery"},
+      {"automationId": "kx-4", "controlType": "Button", "name": "Ajouter 100 pistes", "bounds": "416,300 110x36", "isKeyboardFocusable": true},
+      {"automationId": "kx-5", "controlType": "CheckBox", "name": "Lignes alternées"},
+      {"automationId": "kx-6", "controlType": "Slider", "name": "Hauteur des pistes"},
+      {"automationId": "kx-7", "controlType": "Edit", "name": "Champ de recherche"},
+      {"automationId": "kx-9", "controlType": "List", "name": "Bibliothèque", "children": "ListItem x11 (virtualized)"}
+    ]
+  },
+  "live_sync": {
+    "evidence": "uia_dump_scrolled.txt — after wheel scroll, ListItems change Piste #0-#10 → #1-#11 (reuse-by-ident + prune works)",
+    "structure_changed_event": "raised on mutated sync_end when UiaClientsAreListening"
+  },
+  "flags": {
+    "isEnabled": "en=1 all nodes",
+    "isKeyboardFocusable": "kf=1 on button/checkbox/slider/edit only",
+    "selectionItem.isSelected": "sel=0 (no selection active)"
+  },
+  "bugs_found_during_dev": [
+    "mutex held during UiaReturnRawElementProvider → provider Navigate re-locks g_mtx → wrap dies mid-create → MSAA proxy fallback (fixed: lock released before the UIA call)",
+    "UIA_NativeWindowHandlePropertyId + HostRawElementProvider returned on non-root nodes → merge layer re-injects HWND/NonClient providers into EVERY node → infinite parent/child cycle (fixed: root-only)"
+  ],
+  "verdict": "PASS — UIA tree grafted, complete semantic tree visible to Microsoft inspectors with correct names/roles/bounds/flags; live sync verified"
+}
