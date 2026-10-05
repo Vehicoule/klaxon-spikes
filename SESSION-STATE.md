@@ -566,3 +566,29 @@ player/ (résidu renommage — supprimé).
 - Watch items v17 consignés : `scanNative` borné jusqu'à WAMR-NDK (V2 =
   les plugins reprennent) ; contrat MediaSession généralisable (MPRIS =
   3ᵉ implémentation à V6, même `media_cmds`).
+
+## 2026-10-05 — V1 : gates sim-iOS Metal (proxy honnête) + gate taille APK
+Mesures réelles iPhone 17 / iOS 26.5, driver `graphite-metal(Apple iOS
+simulator GPU)` — **proxy Metal, non extrapolé hardware** (enfant iOS).
+
+| scène | vehicoule | gallery |
+|---|---|---|
+| avg_frame_ms | 9.18 | 14.49 |
+| p99_ms | 23.75 | 24.47 |
+| pacing_p99_ms | 35.80 | 24.56 |
+| first_frame (médiane×3) | 12.61 | 19.72 |
+| idle | ~4.8/s warm-up | 5f/1002 iters |
+| peak_rss_mb | 314.3 | 311.6 |
+
+Verdicts gates (provisoires llvmpipe, rappel : non calibrées device) :
+cold<200 PASS · idle≤6 PASS · p99<16.7 FAIL-proxy (spikes PSO compile +
+drawable sim) · rss<200 FAIL (~310 Mo les deux — vs 122/133 llvmpipe ;
+signature à analyser : Retina @3x + Metal driver + overhead sim).
+
+Appris : simctl install peut no-op silencieusement (vieux binaire mesuré)
+— vérifier par `strings` ; KX_MUSIC_DIR est le vrai nom env ; APFS peut
+retarder la visibilité du .o (retry nm ×5 mergé dans
+build_vehicoule_ios.sh + fix ROOT ../..).
+
+Gate `vehicoule-apk-size` ajoutée (<25 Mo provisoire ; cible ~9-11 Mo —
+BUILD-PROFILE.md) mesurée par device.sh.

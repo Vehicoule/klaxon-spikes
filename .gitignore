@@ -32,3 +32,4 @@ spikes/*
 # spikes/src/ conserve sa petite evidence (json/png de résultats)
 !spikes/src/**/results/
 !spikes/src/**/results/**
+gates/results-*/

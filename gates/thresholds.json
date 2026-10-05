@@ -1,69 +1,77 @@
 {
-  "comment": "Gates K3 — cibles ADR-0008 mesurées puis bloquantes. Tout chiffre ci-dessous vient d'une mesure réelle sur cette VM ; le driver est consigné dans chaque résultat (llvmpipe = software, jamais extrapolé à du hardware).",
-  "gates": [
-    {
-      "scene": "gallery-scroll-p99",
-      "tool": "k2-gallery",
-      "metric": "p99_frame_ms",
-      "op": "<",
-      "value": 16.7,
-      "reason": "p99 frame < 16,7 ms sur scènes de scroll (ADR-0008)"
-    },
-    {
-      "scene": "gallery-scroll-materializes",
-      "tool": "k2-gallery",
-      "metric": "materializations",
-      "op": ">",
-      "value": 0,
-      "reason": "le scroll injecté matérialise réellement (sinon la scène est creuse)"
-    },
-    {
-      "scene": "gallery-cold",
-      "tool": "k2-gallery",
-      "metric": "first_frame_ms",
-      "op": "<",
-      "value": 200,
-      "reason": "cold start médiane-3 < 200 ms — proxy llvmpipe (VM partagée, échantillons ~95-215ms) ; le seuil ADR-0008 150 ms s'appliquera sur hardware en V1"
-    },
-    {
-      "scene": "gallery-idle",
-      "tool": "k2-gallery",
-      "metric": "frames",
-      "op": "<=",
-      "value": 6,
-      "reason": "au repos : ~0 frame (tolérance startup+resize)"
-    },
-    {
-      "scene": "vehicoule-decode",
-      "tool": "vehicoule-v0",
-      "metric": "fed",
-      "op": ">",
-      "value": 0,
-      "reason": "chaîne audio alimente le device (tous décodeurs vendored)"
-    },
-    {
-      "scene": "vehicoule-ui-p99",
-      "tool": "vehicoule-v0",
-      "metric": "p99_ms",
-      "op": "<",
-      "value": 16.7,
-      "reason": "p99 UI Vehicoule < 16,7 ms"
-    },
-    {
-      "scene": "vehicoule-rss",
-      "tool": "vehicoule-v0",
-      "metric": "peak_rss_mb",
-      "op": "<",
-      "value": 200,
-      "reason": "peak RSS < 200 Mo — mesuré ~122 Mo (llvmpipe+Skia software) ; budget réel à recalibrer sur device de référence en V1"
-    },
-    {
-      "scene": "gallery-rss",
-      "tool": "k2-gallery",
-      "metric": "peak_rss_mb",
-      "op": "<",
-      "value": 220,
-      "reason": "peak RSS gallery < 220 Mo — mesuré ~133 Mo ; proxy llvmpipe, budget device en V1"
-    }
-  ]
+ "comment": "Gates K3 — cibles ADR-0008 mesurées puis bloquantes. Tout chiffre ci-dessous vient d'une mesure réelle sur cette VM ; le driver est consigné dans chaque résultat (llvmpipe = software, jamais extrapolé à du hardware).",
+ "gates": [
+  {
+   "scene": "gallery-scroll-p99",
+   "tool": "k2-gallery",
+   "metric": "p99_frame_ms",
+   "op": "<",
+   "value": 16.7,
+   "reason": "p99 frame < 16,7 ms sur scènes de scroll (ADR-0008)"
+  },
+  {
+   "scene": "gallery-scroll-materializes",
+   "tool": "k2-gallery",
+   "metric": "materializations",
+   "op": ">",
+   "value": 0,
+   "reason": "le scroll injecté matérialise réellement (sinon la scène est creuse)"
+  },
+  {
+   "scene": "gallery-cold",
+   "tool": "k2-gallery",
+   "metric": "first_frame_ms",
+   "op": "<",
+   "value": 200,
+   "reason": "cold start médiane-3 < 200 ms — proxy llvmpipe (VM partagée, échantillons ~95-215ms) ; le seuil ADR-0008 150 ms s'appliquera sur hardware en V1"
+  },
+  {
+   "scene": "gallery-idle",
+   "tool": "k2-gallery",
+   "metric": "frames",
+   "op": "<=",
+   "value": 6,
+   "reason": "au repos : ~0 frame (tolérance startup+resize)"
+  },
+  {
+   "scene": "vehicoule-decode",
+   "tool": "vehicoule-v0",
+   "metric": "fed",
+   "op": ">",
+   "value": 0,
+   "reason": "chaîne audio alimente le device (tous décodeurs vendored)"
+  },
+  {
+   "scene": "vehicoule-ui-p99",
+   "tool": "vehicoule-v0",
+   "metric": "p99_ms",
+   "op": "<",
+   "value": 16.7,
+   "reason": "p99 UI Vehicoule < 16,7 ms"
+  },
+  {
+   "scene": "vehicoule-rss",
+   "tool": "vehicoule-v0",
+   "metric": "peak_rss_mb",
+   "op": "<",
+   "value": 200,
+   "reason": "peak RSS < 200 Mo — mesuré ~122 Mo (llvmpipe+Skia software) ; budget réel à recalibrer sur device de référence en V1"
+  },
+  {
+   "scene": "gallery-rss",
+   "tool": "k2-gallery",
+   "metric": "peak_rss_mb",
+   "op": "<",
+   "value": 220,
+   "reason": "peak RSS gallery < 220 Mo — mesuré ~133 Mo ; proxy llvmpipe, budget device en V1"
+  },
+  {
+   "scene": "vehicoule-apk-size",
+   "tool": "vehicoule-v0",
+   "metric": "apk_mb",
+   "op": "<",
+   "value": 25,
+   "reason": "budget APK < 25 Mo — 30 Mo actuel non optimisé (x86 non strip) ; cible ~9-11 Mo arm64+ReleaseSmall+strip (BUILD-PROFILE.md)"
+  }
+ ]
 }

@@ -72,6 +72,7 @@ if [ -n "$GAL_APK" ] && [ -f "$GAL_APK" ]; then
 fi
 
 OUT="$OUT" VEH="$veh_json" GAL="$gal_json" SHA="$apk_sha" \
+APK="$APK" \
 MODEL="$MODEL" SDK="$SDK" ABI="$ABI" EMU="$IS_EMU" STRICT_HW="$STRICT_HW" \
 python3 - <<'PY'
 import json, os, sys
@@ -85,6 +86,7 @@ gal = json.loads(os.environ["GAL"]) if os.environ["GAL"] else None
 sha = os.environ["SHA"]
 th = json.load(open(os.path.join(os.path.dirname(out_path), "thresholds.json")))
 
+apk_mb = os.path.getsize(os.environ["APK"]) / 1e6
 results = []
 def driver(blob):
     base = (blob or {}).get("driver", "?")
@@ -97,11 +99,27 @@ for g in th["gates"]:
                         "reason": "pas d'APK gallery (--gallery-apk)",
                         "artifact_sha256": sha})
         continue
+    m = g["metric"]
+    if m == "apk_mb":
+        # la taille est une propriété du fichier, pas du runtime device
+        v = apk_mb
+        ok = {"<": lambda: v < g["value"], "<=": lambda: v <= g["value"],
+              ">": lambda: v > g["value"], ">=": lambda: v >= g["value"],
+              "==": lambda: v == g["value"]}[g["op"]]()
+        results.append({
+            "artifact_sha256": sha,
+            "target": f'android-{os.environ["ABI"]}', "abi": os.environ["ABI"],
+            "os": f'android-{os.environ["SDK"]}',
+            "backend": "-", "driver": f'apk-file;device:{dev}',
+            "scene": g["scene"], "status": "PASS" if ok else "FAIL",
+            "measurements": {"apk_mb": round(v, 1)},
+            "reason": g["reason"]})
+        continue
     if src is None:
         results.append({"scene": g["scene"], "status": "BLOCKED",
                         "reason": "pas de JSON stats device", "artifact_sha256": sha})
         continue
-    m = g["metric"]; v = src.get(m)
+    v = src.get(m)
     if emu and strict:
         status, ok = "SKIPPED", True
         reason = f'{g["reason"]} — émulateur : jamais extrapolé hardware'

@@ -6,7 +6,7 @@
 # installée dans le simulateur booté. WAMR absent du build (scan natif).
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 K0="$HOME/work/k0-ios"
 SKIA="$K0/deps/skia"
 OUT="$SKIA/out/ios-simulator"
@@ -40,7 +40,11 @@ echo "== zig build-obj vehicoule (aarch64-ios-simulator ReleaseFast) =="
   -target aarch64-ios-simulator -O ReleaseFast -Mklaxon="$ROOT/klaxon/src/klaxon.zig" \
   -target aarch64-ios-simulator -O ReleaseFast -Mph_runtime="$ROOT/pluginhost/src/runtime.zig" \
   -femit-bin="$BIN/vehicoule.o"
-nm "$BIN/vehicoule.o" | grep -qw "_main" || { echo "FAIL: _main absent"; exit 1; }
+for i in 1 2 3 4 5; do
+  nm "$BIN/vehicoule.o" 2>/dev/null | grep -qw "_main" && break
+  [ "$i" = 5 ] && { echo "FAIL: _main absent"; exit 1; }
+  sleep 1   # APFS : le .o peut arriver en visibilité après la fin de zig
+done
 nm -u "$BIN/vehicoule.o" | grep -q "_SDL_RunApp" || { echo "FAIL: _SDL_RunApp non référencé"; exit 1; }
 nm -u "$BIN/vehicoule.o" | grep -q "wasm_runtime" \
   && { echo "FAIL: symboles WAMR référencés (gate is_mobile cassé)"; exit 1; } || true
