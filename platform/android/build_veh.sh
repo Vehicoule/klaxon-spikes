@@ -21,8 +21,11 @@ export KX_SKIA_OUT="${KX_SKIA_OUT:-$HOME/kx/deps/skia/out/android-x64}"
 export ANDROID_HOME="$HOME/Android/Sdk"
 export ANDROID_SDK_ROOT="$ANDROID_HOME"
 
-echo "[zig] vehicoule/main.zig -> vehicoule.o (x86_64-linux-android.31)"
-"$ZIG" build-obj -O ReleaseFast -fPIC -lc -fno-stack-check \
+# ReleaseSmall pour le shipping (objet 1,2 Mo vs 6,7 en ReleaseFast —
+# BUILD-PROFILE.md) ; VEH_OPT=ReleaseFast pour les builds de bench.
+VEH_OPT="${VEH_OPT:-ReleaseSmall}"
+echo "[zig] vehicoule/main.zig -> vehicoule.o (x86_64-linux-android.31, $VEH_OPT)"
+"$ZIG" build-obj -O "$VEH_OPT" -fPIC -lc -fno-stack-check \
     -target x86_64-linux-android.31 \
     --dep klaxon --dep ph_runtime \
     -Mroot="$SRC/zig/vehicoule/main.zig" \
