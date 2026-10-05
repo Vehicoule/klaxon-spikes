@@ -521,3 +521,13 @@ player/ (résidu renommage — supprimé).
   ne peut plus masquer les branches comptime-android.
 - Gates re-run post-merge : 8/8 PASS. APK livré hors repo
   (work/deliverables/vehicoule-v1.apk, 30 Mio).
+
+## [V1 nightly pacing instrumenté]
+
+- host.Stats : interval_ms_ring + p99IntervalMs() — intervalle
+  présent→présent (jitter pacing v13). Émis `pacing_p99_ms` dans les
+  stats JSON des 2 apps. Pas de gate seuil encore : métrique mesurée
+  d'abord (llvmpipe ~2,5ms back-to-back — pacing réel = vsync device).
+- Nightly véritable : nécessite un scheduler externe (cron VM meurt au
+  sleep ; automation Devin = VM fraîche sans deps) — branché quand CI/
+  cloud devices décidés. Le harness run.sh est la brique réutilisable.

@@ -48,6 +48,8 @@ pub const Stats = struct {
     first_frame_ms: f64 = -1,
     sum_frame_ms: f64 = 0,
     frame_ms_ring: [2048]f32 = undefined, // p99 sur les 2048 premières frames
+    interval_ms_ring: [2048]f32 = undefined, // pacing : présent→présent
+    last_present_us: i96 = -1,
     ring_i: usize = 0,
     pub fn avgFrameMs(self: Stats) f64 {
         return if (self.frames > 0) self.sum_frame_ms / @as(f64, @floatFromInt(self.frames)) else 0;
@@ -58,6 +60,15 @@ pub const Stats = struct {
         if (n == 0) return 0;
         var tmp: [2048]f32 = undefined;
         @memcpy(tmp[0..n], self.frame_ms_ring[0..n]);
+        std.mem.sort(f32, tmp[0..n], {}, std.sort.asc(f32));
+        return tmp[n * 99 / 100];
+    }
+    /// p99 des intervalles présent→présent (jitter pacing, gate V1).
+    pub fn p99IntervalMs(self: *const Stats) f64 {
+        const n: usize = @intCast(@min(self.ring_i, 2048));
+        if (n < 2) return 0;
+        var tmp: [2048]f32 = undefined;
+        @memcpy(tmp[0..n], self.interval_ms_ring[0..n]);
         std.mem.sort(f32, tmp[0..n], {}, std.sort.asc(f32));
         return tmp[n * 99 / 100];
     }
@@ -369,11 +380,18 @@ pub const Host = struct {
         // Swap GL uniquement : wasm = le browser présente le canvas à rAF ;
         // dawn = kx_present a déjà fait Present() dans draw().
         if (!is_wasm and self.gl != null) _ = sdl.SDL_GL_SwapWindow(self.win);
-        const dt = @as(f64, @floatFromInt(nowUs(self.io) - t0)) / 1000.0;
+        const now_us = nowUs(self.io);
+        const dt = @as(f64, @floatFromInt(now_us - t0)) / 1000.0;
         if (self.stats.first_frame_ms < 0) self.stats.first_frame_ms = dt;
         self.stats.sum_frame_ms += dt;
-        if (self.stats.ring_i < self.stats.frame_ms_ring.len)
-            self.stats.frame_ms_ring[self.stats.ring_i] = @floatCast(dt);
+        const i = self.stats.ring_i;
+        if (i < self.stats.frame_ms_ring.len)
+            self.stats.frame_ms_ring[i] = @floatCast(dt);
+        if (i < self.stats.interval_ms_ring.len)
+            self.stats.interval_ms_ring[i] = @floatCast(
+                if (self.stats.last_present_us < 0) 0.0
+                else @as(f64, @floatFromInt(now_us - self.stats.last_present_us)) / 1000.0);
+        self.stats.last_present_us = now_us;
         self.stats.ring_i += 1;
         self.stats.frames += 1;
         if (comptime builtin.os.tag == .ios) {
