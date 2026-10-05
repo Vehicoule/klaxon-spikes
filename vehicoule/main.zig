@@ -749,12 +749,13 @@ fn runApp(init: std.process.Init) !void {
 
     var sbuf: [640]u8 = undefined;
     const line = std.fmt.bufPrint(&sbuf,
-        "{{\"tool\":\"vehicoule-v0\",\"backend\":\"{s}\",\"driver\":\"{s}\",\"frames\":{},\"avg_ms\":{d:.3},\"p99_ms\":{d:.3},\"first_frame_ms\":{d:.3},\"tracks\":{},\"state\":\"{s}\",\"pos\":{d:.1},\"fed\":{},\"queued\":{},\"media_cmds\":{}}}\n",
+        "{{\"tool\":\"vehicoule-v0\",\"backend\":\"{s}\",\"driver\":\"{s}\",\"frames\":{},\"avg_ms\":{d:.3},\"p99_ms\":{d:.3},\"first_frame_ms\":{d:.3},\"tracks\":{},\"state\":\"{s}\",\"pos\":{d:.1},\"fed\":{},\"queued\":{},\"media_cmds\":{},\"peak_rss_mb\":{d:.1}}}\n",
         .{ @tagName(g.host.backend()), g.host.driverInfo(),
            g.host.stats.frames, g.host.stats.avgFrameMs(), g.host.stats.p99FrameMs(),
            g.host.stats.first_frame_ms, g.queue.len(),
            @tagName(g.engine.state), @as(f64, @floatFromInt(g.engine.positionUs())) / 1e6,
-           g.engine.fed_frames, g.engine.queuedBytes(), g.media_cmds }) catch "";
+           g.engine.fed_frames, g.engine.queuedBytes(), g.media_cmds,
+           @as(f64, @floatFromInt(k.Stats.peakRssKb())) / 1024.0 }) catch "";
     std.debug.print("{s}", .{line});
     g.engine.close();
     if (g.scan_json) |sj| g.alloc.free(sj);

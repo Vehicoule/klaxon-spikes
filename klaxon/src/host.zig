@@ -61,6 +61,12 @@ pub const Stats = struct {
         std.mem.sort(f32, tmp[0..n], {}, std.sort.asc(f32));
         return tmp[n * 99 / 100];
     }
+    /// Pic RSS du processus en KiB (ru_maxrss) — gate mémoire ADR-0008.
+    /// Cross-plateforme : Windows exposera GetProcessMemoryInfo en V1.
+    pub fn peakRssKb() isize {
+        if (comptime builtin.os.tag == .windows) return 0;
+        return std.posix.getrusage(std.posix.rusage.SELF).maxrss;
+    }
 };
 
 // Le get_proc masque "egl*" : sous GLX (display EGL absente), Skia

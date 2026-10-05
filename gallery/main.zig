@@ -653,13 +653,14 @@ fn runGallery(init: std.process.Init) !void {
     // pas capturé par logcat → écrit aussi dans files/k4-gallery.json.
     var sbuf: [2048]u8 = undefined;
     const line = std.fmt.bufPrint(&sbuf,
-        "{{\"tool\":\"k2-gallery\",\"backend\":\"{s}\",\"driver\":\"{s}\",\"frames\":{},\"avg_frame_ms\":{d:.3},\"p99_frame_ms\":{d:.3},\"first_frame_ms\":{d:.3},\"resizes\":{},\"idle_iters\":{},\"minimized_iters\":{},\"materializations\":{},\"max_slots_used\":{},\"items\":{},\"slots_saturated\":{},\"ime_shift_px\":{d:.1},\"ime_bottom\":{},\"ime_visible\":{}}}\n",
+        "{{\"tool\":\"k2-gallery\",\"backend\":\"{s}\",\"driver\":\"{s}\",\"frames\":{},\"avg_frame_ms\":{d:.3},\"p99_frame_ms\":{d:.3},\"first_frame_ms\":{d:.3},\"resizes\":{},\"idle_iters\":{},\"minimized_iters\":{},\"materializations\":{},\"max_slots_used\":{},\"items\":{},\"slots_saturated\":{},\"ime_shift_px\":{d:.1},\"ime_bottom\":{},\"ime_visible\":{},\"peak_rss_mb\":{d:.1}}}\n",
         .{
             @tagName(g.host.backend()), g.host.driverInfo(), g.host.stats.frames,
             g.host.stats.avgFrameMs(), g.host.stats.p99FrameMs(), g.host.stats.first_frame_ms, g.host.stats.resizes,
             g.host.stats.idle_iters, g.host.stats.minimized_iters,
             g.materializations, g.max_slots_used, g.list.count, g.list.saturated,
             g.ime_shift, g.ime_bottom_last, g.ime_visible_last,
+            @as(f64, @floatFromInt(k.Stats.peakRssKb())) / 1024.0,
         },
     ) catch "";
     std.debug.print("{s}", .{line});

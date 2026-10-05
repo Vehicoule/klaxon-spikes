@@ -48,6 +48,22 @@
       "op": "<",
       "value": 16.7,
       "reason": "p99 UI Vehicoule < 16,7 ms"
+    },
+    {
+      "scene": "vehicoule-rss",
+      "tool": "vehicoule-v0",
+      "metric": "peak_rss_mb",
+      "op": "<",
+      "value": 200,
+      "reason": "peak RSS < 200 Mo — mesuré ~122 Mo (llvmpipe+Skia software) ; budget réel à recalibrer sur device de référence en V1"
+    },
+    {
+      "scene": "gallery-rss",
+      "tool": "k2-gallery",
+      "metric": "peak_rss_mb",
+      "op": "<",
+      "value": 220,
+      "reason": "peak RSS gallery < 220 Mo — mesuré ~133 Mo ; proxy llvmpipe, budget device en V1"
     }
   ]
 }
