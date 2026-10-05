@@ -76,7 +76,10 @@ pub const Stats = struct {
     /// Cross-plateforme : Windows exposera GetProcessMemoryInfo en V1.
     pub fn peakRssKb() isize {
         if (comptime builtin.os.tag == .windows) return 0;
-        return std.posix.getrusage(std.posix.rusage.SELF).maxrss;
+        const v = std.posix.getrusage(std.posix.rusage.SELF).maxrss;
+        // Apple : ru_maxrss est en BYTES (Linux : KiB) — mesuré en V1-iOS.
+        if (comptime builtin.os.tag.isDarwin()) return @divTrunc(v, 1024);
+        return v;
     }
 };
 

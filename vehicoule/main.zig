@@ -24,14 +24,19 @@ const MediaSource = media_source.MediaSource;
 
 const TrackCtx = struct { g: *G, index: usize, slot: *ui.Node };
 
-// ---- MediaSession OS (ADR-0005) : Android seul — glue kx_gallery_glue.cpp ----
+// ---- MediaSession OS (ADR-0005) : Android + iOS — glue kx_gallery_glue.cpp /
+// kx_media_ios.mm (MPNowPlayingInfoCenter + MPRemoteCommandCenter) ----------
 const is_android = builtin.abi == .android;
+const is_ios = builtin.os.tag == .ios;
+const is_mobile = is_android or is_ios;
 extern fn kx_media_set_action_handler(cb: *const fn (?*anyopaque, c_int, i64) callconv(.c) void, ctx: ?*anyopaque) void;
 extern fn kx_media_publish_state(state: c_int, pos_us: i64, speed: f64, dur_us: i64) void;
 extern fn kx_media_publish_meta(title: [*:0]const u8, artist: [*:0]const u8, dur_ms: i64) void;
 extern fn fopen(path: [*:0]const u8, mode: [*:0]const u8) ?*anyopaque;
 extern fn fwrite(ptr: [*]const u8, size: usize, n: usize, f: ?*anyopaque) usize;
 extern fn fclose(f: ?*anyopaque) c_int;
+extern fn SDL_GetBasePath() callconv(.c) ?[*:0]u8;
+extern fn SDL_free(ptr: ?*anyopaque) callconv(.c) void;
 
 // actions figées côté glue : 0 play,1 pause,2 next,3 prev,4 seek(µs),5 stop.
 // Le cb tourne sur le thread JNI → on ne fait qu'enregistrer un pending,
@@ -51,7 +56,7 @@ fn mediaStateCode() c_int {
 }
 
 fn mediaPublishState() void {
-    if (comptime !is_android) return;
+    if (comptime !is_mobile) return;
     kx_media_publish_state(mediaStateCode(), @intCast(g.engine.positionUs()),
         1.0, @intCast(g.engine.durationUs()));
 }
@@ -182,7 +187,7 @@ fn scanWorker() void {
     g.scanning.store(true, .release);
     defer g.scan_done.store(true, .release);
     defer g.scanning.store(false, .release);
-    if (comptime is_android) { // V1 : WAMR-NDK non porté — scan natif même JSON
+    if (comptime is_mobile) { // V1 : WAMR non porté mobile — scan natif même JSON
         scanNative();
         return;
     }
@@ -370,7 +375,7 @@ fn onVol(v: f32, ctx: ?*anyopaque) void {
 /// subscribe() : le moteur pousse les événements — sur err on le montre,
 /// sur tout event on demande un frame (états déjà reflétés dans l'UI).
 fn onMediaEvent(_: ?*anyopaque, ev: media_events.MediaEvent) void {
-    if (comptime is_android) switch (ev) {
+    if (comptime is_mobile) switch (ev) {
         .state => mediaPublishState(),
         .position => mediaPublishState(),
         else => {},
@@ -533,7 +538,7 @@ fn tick() void {
     }
 
     // MediaSession OS : commandes lockscreen/notif drainées sur thread SDL
-    if (comptime is_android) {
+    if (comptime is_mobile) {
         const act = g.media_pend_act.swap(-1, .acq_rel);
         if (act >= 0) {
             const arg = g.media_pend_arg.load(.acquire);
@@ -651,7 +656,13 @@ fn a11yPress(ctx: ?*anyopaque, node: *ui.Node, action: c_int) void {
 }
 
 fn setup(font_data: []const u8) !void {
-    g.host = try k.Host.initGlWindow(g.io, "Vehicoule", 900, 640);
+    g.host = if (comptime is_ios)
+        // iOS : graphite-metal via SDL_Metal_CreateView (même chemin que mac).
+        try k.Host.initMetalWindow(g.io, "Vehicoule", 402, 874)
+    else if (comptime builtin.os.tag == .macos)
+        try k.Host.initMetalWindow(g.io, "Vehicoule", 900, 640)
+    else
+        try k.Host.initGlWindow(g.io, "Vehicoule", 900, 640);
     _ = kx.kx_fonts_add(g.host.fonts, font_data.ptr, @intCast(font_data.len));
 
     g.p_bg = mkPaint(ui.theme.bg);
@@ -739,7 +750,7 @@ fn setup(font_data: []const u8) !void {
                 .children = &.{ &g.header, &g.transport, &g.divider_node,
                                &g.list.host_node, &g.statusbar } };
     g.host.setA11yActionHandler(a11yPress, &g);
-    if (comptime is_android) kx_media_set_action_handler(mediaCmdCb, null);
+    if (comptime is_mobile) kx_media_set_action_handler(mediaCmdCb, null);
     // le bouton play est l'action principale → label AT
     g.root.semantics = .{ .label = "Vehicoule" };
 }
@@ -767,12 +778,31 @@ fn runApp(init: std.process.Init) !void {
             }
         }
     }
-    const font_data = if (comptime is_android)
+    // iOS : pas d'argv utilisable via simctl launch → fallback env
+    // (SIMCTL_CHILD_* propagé dans le sandbox) + dir par défaut = bundle.
+    if (comptime is_ios) {
+        if (std.c.getenv("KX_AUTOPLAY") != null) g.autoplay = true;
+        if (std.c.getenv("KX_SECS")) |s|
+            g.deadline_ms = nowMs() + (std.fmt.parseInt(i64, std.mem.span(s), 10) catch 0) * 1000;
+        if (std.c.getenv("KX_FRAMES")) |s|
+            g.max_frames = std.fmt.parseInt(i64, std.mem.span(s), 10) catch -1;
+        if (std.c.getenv("KX_MUSIC_DIR")) |d|
+            g.music_dir = std.mem.span(d)
+        else if (std.mem.eql(u8, g.music_dir, "music-test")) {
+            // SDL_GetBasePath → répertoire du bundle .app ("/…/Vehicoule.app/")
+            if (SDL_GetBasePath()) |bp| {
+                const joined = std.fmt.allocPrint(g.alloc, "{s}music-test",
+                    .{std.mem.span(bp)}) catch null;
+                if (joined) |j| g.music_dir = j;
+            }
+        }
+    }
+    const font_data = if (comptime is_mobile)
         @embedFile("DejaVuSans.ttf")
     else
         try std.Io.Dir.cwd().readFileAlloc(g.io,
             "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", init.gpa, .limited(8 << 20));
-    defer if (comptime !is_android) init.gpa.free(font_data);
+    defer if (comptime !is_mobile) init.gpa.free(font_data);
     try setup(font_data);
     g.engine.subscribe(.{ .ctx = null, .cb = onMediaEvent });
 
@@ -797,21 +827,29 @@ fn runApp(init: std.process.Init) !void {
            g.engine.fed_frames, g.engine.queuedBytes(), g.media_cmds,
            @as(f64, @floatFromInt(k.Stats.peakRssKb())) / 1024.0 }) catch "";
     std.debug.print("{s}", .{line});
-    if (comptime is_android) { // stderr invisible → stats via fichier (cf. k4)
-        if (fopen("/data/data/org.libsdl.app/files/vehicoule.json", "w")) |f| {
-            _ = fwrite(line.ptr, 1, line.len, f);
-            _ = fclose(f);
-        }
+    if (comptime is_mobile) { // stderr invisible → stats via fichier sandbox
+        var pbuf: [1024]u8 = undefined;
+        const stats_path: [:0]const u8 = if (comptime is_android)
+            "/data/data/org.libsdl.app/files/vehicoule.json"
+        else blk: {
+            const home: [*:0]const u8 = std.c.getenv("HOME") orelse break :blk "";
+            break :blk std.fmt.bufPrintSentinel(&pbuf,
+                "{s}/Documents/vehicoule.json", .{std.mem.span(home)}, 0) catch "";
+        };
+        if (stats_path.len > 0)
+            if (fopen(stats_path, "w")) |f| {
+                _ = fwrite(line.ptr, 1, line.len, f);
+                _ = fclose(f);
+            };
     }
     g.engine.close();
     if (g.scan_json) |sj| g.alloc.free(sj);
     g.queue.deinit(g.alloc);
     // teardown runtime wasm après la fin du scan (unload déjà fait dans le worker)
     while (g.scanning.load(.acquire)) {
-        var ts = std.os.linux.timespec{ .sec = 0, .nsec = 1_000_000 };
-        _ = std.os.linux.nanosleep(&ts, null);
+        g.io.sleep(.fromNanoseconds(1_000_000), .awake) catch {};
     }
-    if (comptime !is_android) {
+    if (comptime !is_mobile) {
         if (g.scan_inited.load(.acquire)) {
             natives.reset();
             runtime.deinit();
@@ -820,13 +858,37 @@ fn runApp(init: std.process.Init) !void {
     g.host.deinit();
 }
 
+// iOS : le Mach-O entre par main → SDL_RunApp → UIApplicationMain →
+// SDLUIKitDelegate.postFinishLaunch appelle forward sur le main thread
+// (même modèle que gallery — cf. gallery/main.zig).
+var g_init: std.process.Init = undefined;
+extern fn SDL_RunApp(argc: c_int, argv: [*c][*c]u8, main_func: *const fn (c_int, [*c][*c]u8) callconv(.c) c_int, reserved: ?*anyopaque) c_int;
+
+fn sdlIosForward(argc: c_int, argv: [*c][*c]u8) callconv(.c) c_int {
+    _ = argc;
+    _ = argv;
+    runApp(g_init) catch |e| {
+        std.debug.print("[vehicoule] runApp error: {s}\n", .{@errorName(e)});
+        if (@errorReturnTrace()) |t| std.debug.dumpStackTrace(t);
+        return 1;
+    };
+    return 0;
+}
+
 pub fn main(init: std.process.Init) !void {
+    if (comptime is_ios) {
+        g_init = init;
+        const v = init.minimal.args.vector;
+        const rc = SDL_RunApp(@intCast(v.len), @ptrCast(@constCast(v.ptr)), sdlIosForward, null);
+        if (rc != 0) return error.RunAppFailed;
+        return;
+    }
     return runApp(init);
 }
 
 // ---- Entrée Android : SDLActivity → SDL_main → kx_vehicoule_main ----------
 export fn kx_vehicoule_main(argc: c_int, argv: ?[*:null]?[*:0]u8) c_int {
-    if (comptime !is_android) return -1;
+    if (comptime !is_mobile) return -1;
     var argv_buf: [64][*:0]const u8 = undefined;
     const n: usize = @min(@as(usize, @intCast(@max(0, argc))), 64);
     const av = argv orelse return -1;

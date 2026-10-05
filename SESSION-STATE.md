@@ -531,3 +531,28 @@ player/ (résidu renommage — supprimé).
 - Nightly véritable : nécessite un scheduler externe (cron VM meurt au
   sleep ; automation Devin = VM fraîche sans deps) — branché quand CI/
   cloud devices décidés. Le harness run.sh est la brique réutilisable.
+
+## [V1-iOS mergé — vraie app sur simulateur + MediaSession iOS]
+
+- Enfant iOS : Vehicoule joue en sim (iPhone 17 / iOS 26.5, graphite-metal
+  Apple sim GPU). tracks:8, fed:53248, pos temps réel, enchaînement
+  auto prouvé 2 runs. avg 8.76ms (feed audio continu), cold 601ms.
+- MediaSession iOS livrée : platform/ios/kx_media_ios.mm — miroir exact
+  du contrat Android (actions 0-5) sur MPNowPlayingInfoCenter +
+  MPRemoteCommandCenter ; nowplaying.json réellement publié
+  (title/duration/elapsed/rate) ; chaîne remote-command prouvée selftest
+  (emit(2) → media_cmds:1 → nextTrack).
+- is_mobile = android∨ios : tous les gates étendus (MediaSession,
+  scanNative, font embed, stats fichier, kx_vehicoule_main, teardown).
+- Décodeurs : gate KXD_NO_FFMPEG iOS dans decoder.c (refus honnête
+  m4a/aac/wma — fork/exec impossible).
+- Bugs réels absorbés : initGlWindow→NoKx iOS (dispatch initMetalWindow),
+  std.os.linux.nanosleep→io.sleep, env SIMCTL_CHILD_* (pas d'argv),
+  SDL_GetBasePath→bundle music-test/, stats→Documents/vehicoule.json,
+  main→SDL_RunApp forward.
+- ru_maxrss Apple = BYTES corrigé (peakRssKb div 1024 sur Darwin).
+- Build script repo : platform/ios/build_vehicoule_ios.sh (zig
+  a64-ios-sim + décodeurs + bundle .app + UIBackgroundModes audio).
+- FAIL env honnête consigné : zéro device audio hôte → coreaudio
+  "Device not found" ; l'app dégrade proprement (open failed→ended→next).
+  Audio réel vérifiable device/hôte-avec-sortie uniquement.

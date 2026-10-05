@@ -18,6 +18,15 @@
 #include <sys/wait.h>
 #include <fcntl.h>
 
+// iOS : pas de fork/exec ni ffmpeg → fallback externe désactivé (refus
+// honnête m4a/aac/wma — même sémantique « decode failed » côté moteur).
+#if defined(__APPLE__)
+#include <TargetConditionals.h>
+#if TARGET_OS_IOS
+#define KXD_NO_FFMPEG 1
+#endif
+#endif
+
 typedef enum { KXD_MP3, KXD_FLAC, KXD_WAV, KXD_VORBIS, KXD_OPUS, KXD_FFMPEG } kxd_kind;
 
 typedef struct {
@@ -108,6 +117,9 @@ void* kxdec_open(const char* path) {
     } else {
         // décodeur OS (ADR-0005) : ffmpeg externe pour aac/m4a/wma et le
         // reste — fork/exec sans shell, sortie f32 stéréo @48k sur pipe.
+#if defined(KXD_NO_FFMPEG)
+        goto fail;
+#else
         d->kind = KXD_FFMPEG;
         d->rate = 48000;
         d->channels = 2;
@@ -143,6 +155,7 @@ void* kxdec_open(const char* path) {
         int st = 0; waitpid(pid, &st, 0);
         if (!WIFEXITED(st) || WEXITSTATUS(st) != 0) goto fail; // ffmpeg absent/erreur → refus honnête
         d->frames = len / (2 * sizeof(float));
+#endif
     }
     if (!d->frames || !d->pcm) goto fail;
     return d;
