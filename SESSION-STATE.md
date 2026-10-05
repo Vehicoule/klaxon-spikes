@@ -556,3 +556,13 @@ player/ (résidu renommage — supprimé).
 - FAIL env honnête consigné : zéro device audio hôte → coreaudio
   "Device not found" ; l'app dégrade proprement (open failed→ended→next).
   Audio réel vérifiable device/hôte-avec-sortie uniquement.
+
+## 2026-10-04 — V1 : device.sh + watch items v17
+- `gates/device.sh` + `platform/android/docs/device-measure.md` : mesure
+  les mêmes gates ADR-0008 sur device adb réel (install APK, push fixtures
+  en sandbox, `am start -e kx_args`, récup stats JSON, eval
+  thresholds.json). `driver` consigne `device:<modèle> sdk<N>` ; émulateur
+  détecté et marqué (SKIPPED si --strict-hw) — jamais extrapolé.
+- Watch items v17 consignés : `scanNative` borné jusqu'à WAMR-NDK (V2 =
+  les plugins reprennent) ; contrat MediaSession généralisable (MPRIS =
+  3ᵉ implémentation à V6, même `media_cmds`).
