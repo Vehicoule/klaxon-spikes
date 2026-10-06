@@ -653,3 +653,4 @@ BUILD-PROFILE.md) mesurée par device.sh.
 - Findings UX confirmés : clics buggés sur retail, audio OK.
 - Question user « pourquoi Ganesh » : Android ship = ganesh-GLES volontaire (host.zig ganesh_gl_current en dur) — Graphite-Vulkan prouvé qu'en ém via SwiftShader, jamais contre un driver réel. Spike graphite-vulkan sur Adreno réel (sdk36) = piste ouverte, chiffres déjà bons sous GLES.
 - Cible user : 120 fps constants → budget 8,33 ms/frame (avg cible ≈≤6, p99 ≤8,3). Retail actuel avg 12-15/p99 17-19 = 60 fps solides, pas 120. Leviers : graphite-vulkan, dirty-rect, caches Skia/layout, vsync 120 Hz réel. À faire valider par l'agent planning comme nouveaux seuils gates.
+- RECTIFICATION POLITIQUE BACKEND (user) : Graphite par défaut PARTOUT, Ganesh/raster = fallback quand Graphite impossible — jamais la cible. Android ganesh-en-dur = dérive à corriger. Cibles perf : 120 fps constants sans jank (crucial), ≥60 fps constants même en raster.
