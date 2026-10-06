@@ -663,3 +663,5 @@ BUILD-PROFILE.md) mesurée par device.sh.
 - Bug clics ROOT-CAUSE : ev[34,1,1] = BUTTON_UP synthèse tactile→souris SDL perdus sur retail → fix = SDL_TOUCH_MOUSE_EVENTS=0 + FINGER_* directs (8e3139d).
 - Autoplay-scène cassé par quoting `'$args'` (quotes collées aux args extrêmes après split(" ")) → reverté ; autoplay jamais vu = state:idle+feds:0 expliqués.
 - Prochaine mesure : v1.7 APK + touch marker + scène autoplay → gates réels graphite-Adreno.
+- Ledger RSS implémenté (82600ae) : marques par étage d'init dans le JSON (`rss:{sdl,win,ctx,surface,tgt,fonts,scene}`) — desktop sain (scene 86.6, peak 120.5). Répond au point ouvert majeur v19 : attribution des 213 Mo retail.
+- Plan v19 relu : fidèle ; 1 erreur signalée au user (« sous la gate <12 » → en réalité au-dessus de 0,6 Mo).
