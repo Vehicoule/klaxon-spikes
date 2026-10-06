@@ -581,10 +581,10 @@ fn tick() void {
             // scan terminé sans piste : autoplay silencieux sinon invisible
             // sur device (ex. dir vide, fixtures absentes, mauvais path).
             g.autoplay_logged = true;
-            sdl.SDL_Log("kx: autoplay skipped, queue empty (dir=%.*s)",
-                @as(c_int, @intCast(g.music_dir.len)), g.music_dir.ptr);
+            // stderr (pas SDL_Log) : canal prouvé vers logcat sur retail.
+            std.debug.print("kx: autoplay skipped, queue empty (dir={s})\n", .{g.music_dir});
             if (g.scan_err) |e|
-                sdl.SDL_Log("kx: scan_err=%.*s", @as(c_int, @intCast(e.len)), e.ptr);
+                std.debug.print("kx: scan_err={s}\n", .{e});
         }
     }
 
