@@ -131,6 +131,8 @@ const G = struct {
     running: bool = true,
     frames: i64 = 0,
     ticks: i64 = 0,
+    taps: i64 = 0,
+    hits: i64 = 0,
     max_frames: i64 = -1,
     deadline_ms: i64 = -1,
     dirty_extra: bool = true,
@@ -439,7 +441,11 @@ fn onEvent(e: k.Event) void {
             const ev = ui.PointerEvent{ .kind = .down, .x = p.x, .y = p.y, .button = p.button };
             _ = ui.dispatchScrollable(&g.root, ev);
             const hit = ui.dispatch(&g.root, ev);
-            if (hit) |h| g.focus.set(if (h.semantics.focusable) h else null) else g.focus.set(null);
+            g.taps += 1;
+            if (hit) |h| {
+                g.hits += 1;
+                g.focus.set(if (h.semantics.focusable) h else null);
+            } else g.focus.set(null);
             g.dirty_extra = true;
         },
         .pointer_up => |p| {
@@ -667,13 +673,14 @@ fn tick() void {
 fn emitStats() void {
     var sbuf: [640]u8 = undefined;
     const line = std.fmt.bufPrint(&sbuf,
-        "{{\"tool\":\"vehicoule-v0\",\"backend\":\"{s}\",\"driver\":\"{s}\",\"frames\":{},\"avg_ms\":{d:.3},\"p99_ms\":{d:.3},\"pacing_p99_ms\":{d:.3},\"first_frame_ms\":{d:.3},\"ttff_ms\":{d:.3},\"tracks\":{},\"state\":\"{s}\",\"pos\":{d:.1},\"fed\":{},\"queued\":{},\"media_cmds\":{},\"peak_rss_mb\":{d:.1}}}\n",
+        "{{\"tool\":\"vehicoule-v0\",\"backend\":\"{s}\",\"driver\":\"{s}\",\"frames\":{},\"avg_ms\":{d:.3},\"p99_ms\":{d:.3},\"pacing_p99_ms\":{d:.3},\"first_frame_ms\":{d:.3},\"ttff_ms\":{d:.3},\"tracks\":{},\"state\":\"{s}\",\"pos\":{d:.1},\"fed\":{},\"queued\":{},\"media_cmds\":{},\"taps\":{},\"hits\":{},\"peak_rss_mb\":{d:.1}}}\n",
         .{ @tagName(g.host.backend()), g.host.driverInfo(),
            g.host.stats.frames, g.host.stats.avgFrameMs(), g.host.stats.p99FrameMs(),
            g.host.stats.p99IntervalMs(),
            g.host.stats.first_frame_ms, g.host.stats.ttff_ms, g.queue.len(),
            @tagName(g.engine.state), @as(f64, @floatFromInt(g.engine.positionUs())) / 1e6,
            g.engine.fed_frames, g.engine.queuedBytes(), g.media_cmds,
+           g.taps, g.hits,
            @as(f64, @floatFromInt(k.Stats.peakRssKb())) / 1024.0 }) catch "";
     std.debug.print("{s}", .{line});
     if (comptime is_mobile) { // stderr invisible → stats via fichier sandbox
