@@ -58,7 +58,11 @@ case "$EMU$HW" in *1*|*goldfish*|*ranchu*|*emu*) IS_EMU=1;; esac
 echo "device: $MODEL (sdk $SDK, abi $ABI, hw $HW) émulateur=$IS_EMU"
 
 # --- install + fixtures ----------------------------------------------------
-$ADB install -r "$APK" >/dev/null || { echo "adb install KO"; exit 2; }
+# install non masquée : HyperOS/MIUI peut exiger une confirmation « Installer
+# via USB » sur l'écran → échec silencieux = vieille APK qui tourne (BLOCKED).
+if ! $ADB install -r "$APK" 2>&1 | tee /dev/stderr | grep -q Success; then
+    echo "adb install KO — regarde l'écran du tel (popup « Installer via USB » ?)" >&2; exit 2
+fi
 # fixtures : depuis v1.1 la musique démo est embarquée dans l'APK
 # (assets → files/music au 1er boot). Le push adb ne sert que pour un
 # APK pré-v1.1 ou un contenu perso via --fixtures. Optionnel, jamais fatal.
@@ -84,6 +88,9 @@ run_scene() { # nom, kx_args, fichier stats → JSON ligne (ou vide)
     start_out=$($ADB shell am start -W -n "$PKG/.SDLActivity" --es kx_args "$args" 2>&1)
     wait_ms=$(echo "$start_out" | sed -n 's/.*WaitTime: \([0-9]*\).*/\1/p' | tail -1)
     total_ms=$(echo "$start_out" | sed -n 's/.*TotalTime: \([0-9]*\).*/\1/p' | tail -1)
+    # stats périodiques depuis v1.4 : on accumule la dernière émission et
+    # on sort quand la scène est finie (frames≈cible ou process mort).
+    local last_j="" fr alive
     for i in $(seq 1 60); do
         sleep 2
         local j
@@ -95,13 +102,19 @@ run_scene() { # nom, kx_args, fichier stats → JSON ligne (ou vide)
                  sed -n 's/.*\({.*}\)/\1/p')
         ;; esac
         case "$j" in \{*)
-            # injecte la latence de lancement OS dans le résultat
-            j="${j#\{}"
-            echo "{\"launch_wait_ms\":${wait_ms:-null},\"launch_total_ms\":${total_ms:-null},$j"
-            return;;
-        esac
+            last_j="$j"
+            fr=$(echo "$j" | sed -n 's/.*"frames":\([0-9]*\).*/\1/p')
+            alive=$($ADB shell pidof "$PKG" 2>/dev/null)
+            [ -n "$fr" ] && [ "$fr" -ge 390 ] && break
+            [ -z "$alive" ] && break
+        ;; esac
     done
-    echo ""
+    case "$last_j" in \{*)
+        last_j="${last_j#\{}"
+        echo "{\"launch_wait_ms\":${wait_ms:-null},\"launch_total_ms\":${total_ms:-null},$last_j"
+    ;; *)
+        echo ""
+    ;; esac
 }
 
 apk_sha=$(sha256sum "$APK" | cut -c1-16)
@@ -110,7 +123,7 @@ veh_json=$(run_scene vehicoule \
     vehicoule.json)
 gal_json=""
 if [ -n "$GAL_APK" ] && [ -f "$GAL_APK" ]; then
-    $ADB install -r "$GAL_APK" >/dev/null
+    $ADB install -r "$GAL_APK" 2>&1 | grep -q Success || echo "warn: install gallery KO (popup tel ?)" >&2
     gal_json=$(run_scene gallery "--frames 400 --wheel 100 --secs 45" k4-gallery.json)
 fi
 
