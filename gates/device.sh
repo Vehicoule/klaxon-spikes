@@ -15,20 +15,37 @@ APK=""
 GAL_APK=""
 SERIAL=""
 STRICT_HW=0
+FIXTURES="none"
 PKG=org.libsdl.app
 while [ $# -gt 0 ]; do case "$1" in
   --apk) APK="$2"; shift 2;;
   --gallery-apk) GAL_APK="$2"; shift 2;;
+  --fixtures) FIXTURES="$2"; shift 2;;
   --serial) SERIAL="$2"; shift 2;;
   --strict-hw) STRICT_HW=1; shift;;
-  *) echo "usage: device.sh [--apk p] [--gallery-apk p] [--serial s] [--strict-hw]"; exit 2;;
+  *) echo "usage: device.sh [--apk p] [--gallery-apk p] [--fixtures dir] [--serial s] [--strict-hw]"; exit 2;;
 esac; done
 ADB="adb ${SERIAL:+-s $SERIAL}"
 
 # --- prérequis -------------------------------------------------------------
-command -v adb >/dev/null || { echo "adb absent (ANDROID_HOME/platform-tools)"; exit 2; }
-[ -n "$APK" ] || APK="$ROOT/../deliverables/vehicoule-v1.apk"
-[ -f "$APK" ] || { echo "APK introuvable : $APK"; exit 2; }
+# adb : PATH, puis ANDROID_HOME/ANDROID_SDK_ROOT/platform-tools.
+if ! command -v adb >/dev/null; then
+  for c in "${ANDROID_HOME:-}/platform-tools/adb" \
+           "${ANDROID_SDK_ROOT:-}/platform-tools/adb"; do
+    [ -x "$c" ] && PATH="$(dirname "$c"):$PATH" && break
+  done
+fi
+command -v adb >/dev/null || { echo "adb absent (platform-tools : PATH ou ANDROID_HOME)"; exit 2; }
+command -v python3 >/dev/null || { echo "python3 absent"; exit 2; }
+# APK : --apk requis sauf s'il en existe un dans ./ ou deliverables/ voisins.
+if [ -z "$APK" ]; then
+  for d in "." "$ROOT" "$ROOT/../deliverables" "$HOME/Downloads" "$HOME/Téléchargements"; do
+    APK=$(ls -t "$d"/vehicoule-*.apk 2>/dev/null | head -1)
+    [ -n "$APK" ] && break
+  done
+fi
+[ -f "${APK:-}" ] || { echo "APK introuvable — passe --apk /chemin/vehicoule-*.apk"; exit 2; }
+echo "apk: $APK"
 $ADB get-state >/dev/null 2>&1 || { echo "aucun device adb connecté"; exit 2; }
 
 MODEL=$($ADB shell getprop ro.product.model | tr -d '\r' | tr ' ' '_')
@@ -42,10 +59,14 @@ echo "device: $MODEL (sdk $SDK, abi $ABI, hw $HW) émulateur=$IS_EMU"
 
 # --- install + fixtures ----------------------------------------------------
 $ADB install -r "$APK" >/dev/null || { echo "adb install KO"; exit 2; }
-$ADB push "$ROOT/vehicoule/music-test" /data/local/tmp/music-test >/dev/null
-$ADB shell 'run-as '"$PKG"' sh -c "cp -r /data/local/tmp/music-test files/music 2>/dev/null || cp /data/local/tmp/music-test/* files/music/ 2>/dev/null || true"' || true
-$ADB shell "run-as $PKG ls files/music >/dev/null" || \
-    echo "warn: fixtures non copiées (run-as requiert un build debuggable)"
+# fixtures : depuis v1.1 la musique démo est embarquée dans l'APK
+# (assets → files/music au 1er boot). Le push adb ne sert que pour un
+# APK pré-v1.1 ou un contenu perso via --fixtures. Optionnel, jamais fatal.
+if [ "$FIXTURES" != "none" ] && [ -d "$FIXTURES" ]; then
+  $ADB push "$FIXTURES" /data/local/tmp/kx-fixtures >/dev/null && \
+  $ADB shell 'run-as '"$PKG"' sh -c "mkdir -p files/music && cp -r /data/local/tmp/kx-fixtures files/music 2>/dev/null || cp /data/local/tmp/kx-fixtures/* files/music/ 2>/dev/null || true"' 2>/dev/null || \
+    echo "warn: fixtures non copiées (run-as requiert un build debuggable — non fatal)"
+fi
 
 run_scene() { # nom, kx_args, fichier stats → JSON ligne (ou vide)
     local name="$1" args="$2" stats="$3"
