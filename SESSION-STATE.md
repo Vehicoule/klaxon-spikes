@@ -652,3 +652,4 @@ BUILD-PROFILE.md) mesurée par device.sh.
 - PREMIERS CHIFFRES HARDWARE (user, Xiaomi 23127PN0CG, Adreno 750 ganesh-gles) : ttff 42,2 ms (cible <200 explosée ×5), avg 12-15 ms, p99 17-19 ms, RSS ~200 Mo, audio confirmé (fed/state:playing). pacing_p99 344-2914 = bruit idle-throttle, à exclure des gaps d'idle.
 - Findings UX confirmés : clics buggés sur retail, audio OK.
 - Question user « pourquoi Ganesh » : Android ship = ganesh-GLES volontaire (host.zig ganesh_gl_current en dur) — Graphite-Vulkan prouvé qu'en ém via SwiftShader, jamais contre un driver réel. Spike graphite-vulkan sur Adreno réel (sdk36) = piste ouverte, chiffres déjà bons sous GLES.
+- Cible user : 120 fps constants → budget 8,33 ms/frame (avg cible ≈≤6, p99 ≤8,3). Retail actuel avg 12-15/p99 17-19 = 60 fps solides, pas 120. Leviers : graphite-vulkan, dirty-rect, caches Skia/layout, vsync 120 Hz réel. À faire valider par l'agent planning comme nouveaux seuils gates.
