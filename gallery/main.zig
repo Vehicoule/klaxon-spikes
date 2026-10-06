@@ -685,8 +685,8 @@ fn runGallery(init: std.process.Init) !void {
         // externe privé : adb shell lit sans run-as (retail).
         var pbuf2: [1024]u8 = undefined;
         const gpath: [:0]const u8 = blk: {
+            // retour = buffer statique SDL — ne pas free.
             const ext = SDL_GetAndroidExternalStoragePath() orelse break :blk "/data/data/org.libsdl.app/files";
-            defer SDL_free(ext);
             break :blk std.fmt.bufPrintSentinel(&pbuf2,
                 "{s}/k4-gallery.json", .{std.mem.span(ext)}, 0) catch "";
         };

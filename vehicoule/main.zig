@@ -862,8 +862,8 @@ fn runApp(init: std.process.Init) !void {
         const stats_path: [:0]const u8 = if (comptime is_android) blk: {
             // dossier externe privé de l'app : pas de permission, lisible
             // par adb shell sur retail (run-as refuse hors userdebug).
+            // retour = buffer statique SDL (s_AndroidExternalFilesPath) — ne pas free.
             const ext = SDL_GetAndroidExternalStoragePath() orelse break :blk "";
-            defer SDL_free(ext);
             break :blk std.fmt.bufPrintSentinel(&pbuf,
                 "{s}/vehicoule.json", .{std.mem.span(ext)}, 0) catch "";
         } else blk: {
