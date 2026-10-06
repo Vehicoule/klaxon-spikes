@@ -102,6 +102,7 @@ pub const Host = struct {
     hwnd: ?*anyopaque = null, // handle natif (HWND) pour la swapchain dawn
     view: ?*sdl.MetalView = null, // CAMetalView pour le backend metal (macOS/iOS)
     scale: f64 = 1,            // contentsScale dérivé px/points (retina)
+    dp: f64 = 1,               // densité d'affichage px/dp (Android = SDL_GetWindowDisplayScale ; 1 ailleurs)
     mode: GpuMode = .gl,
     ctx: *kx.Ctx,
     fonts: ?*kx.Fonts,
@@ -120,6 +121,15 @@ pub const Host = struct {
         if (self.boot_t0_us < 0 or t0_us < self.boot_t0_us) self.boot_t0_us = t0_us;
     }
 
+    /// window-unit → UI-unit : iOS points→px = scale ; Android px→dp = 1/dp.
+    pub fn winToUi(self: *const Host) f32 {
+        return @floatCast(self.scale / self.dp);
+    }
+    /// UI-unit → window-unit : inverse (SetTextInputArea, IME area).
+    pub fn uiToWin(self: *const Host) f32 {
+        return @floatCast(self.dp / self.scale);
+    }
+
     pub fn initGlWindow(io: std.Io, title: [*c]const u8, w: c_int, h: c_int) !Host {
         const t0 = nowUs(io); // marque ttff la plus ancienne côté framework
         if (!sdl.SDL_Init(sdl.SDL_INIT_VIDEO)) return error.SdlInit;
@@ -134,6 +144,7 @@ pub const Host = struct {
         }
         _ = sdl.SDL_GL_SetAttribute(sdl.SDL_GL_STENCIL_SIZE, 8);
         const flags: u64 = sdl.SDL_WINDOW_OPENGL | sdl.SDL_WINDOW_RESIZABLE |
+            sdl.SDL_WINDOW_HIGH_PIXEL_DENSITY |
             (if (comptime is_android) sdl.SDL_WINDOW_FULLSCREEN else 0);
         const win = sdl.SDL_CreateWindow(title, w, h, flags) orelse return error.NoWindow;
         const gl = sdl.SDL_GL_CreateContext(win) orelse return error.NoGL;
@@ -149,11 +160,20 @@ pub const Host = struct {
             hwnd = sdl.SDL_GetPointerProperty(sdl.SDL_GetWindowProperties(win),
                 sdl.SDL_PROP_WINDOW_WIN32_HWND_POINTER, null);
         }
-        return .{
+        var host: Host = .{
             .win = win, .gl = gl, .hwnd = hwnd, .ctx = ctx,
             .fonts = kx.kx_fonts_global(), .target = tgt, .io = io,
             .boot_t0_us = t0,
         };
+        if (comptime is_android) {
+            // Densité réelle (display->content_scale = Android_ScreenDensity —
+            // vérifié dans SDL_androidvideo.c) : l'UI est cadrée en dp, le
+            // canvas est scalé ×dp. Émulateur x86 tombe souvent à ~1 → bug
+            // invisible là-bas, cassant sur téléphone ~2.6 (repro wm density).
+            host.dp = @floatCast(sdl.SDL_GetWindowDisplayScale(win));
+            if (host.dp <= 0) host.dp = 1;
+        }
+        return host;
     }
 
     /// Variante Apple : SDL_WINDOW_METAL + SDL_Metal_CreateView → CAMetalLayer
@@ -316,9 +336,10 @@ pub const Host = struct {
         if (comptime builtin.os.tag == .macos or builtin.os.tag == .ios) {
             if (self.view) |v| try ui.pushA11y(v, self.scale, root, alloc);
         } else if (comptime is_android or builtin.os.tag == .linux) {
-            // Android : provider JNI sur la SurfaceView ; Linux : provider
-            // AT-SPI sd-bus global — param view ignoré dans les deux cas.
-            try ui.pushA11y(null, 1, root, alloc);
+            // Android : provider JNI sur la SurfaceView — scale=dp, le Java
+            // multiplie les bounds UI(dp)→px écran (TalkBack) ; Linux :
+            // provider AT-SPI sd-bus global, UI=px → 1.
+            try ui.pushA11y(null, if (comptime is_android) self.dp else 1, root, alloc);
         } else if (comptime builtin.os.tag == .windows) {
             if (self.hwnd) |h| try ui.pushA11y(h, self.scale, root, alloc);
         }
@@ -361,7 +382,7 @@ pub const Host = struct {
     pub fn pollEvents(self: *Host, on_event: ?*const fn (Event) void) bool {
         var ev: sdl.SDL_Event = undefined;
         while (sdl.SDL_PollEvent(&ev)) {
-            const e = translate(ev, @floatCast(self.scale)) orelse continue;
+            const e = translate(ev, self.winToUi()) orelse continue;
             if (on_event) |f| f(e);
             if (!self.handleEvent(e)) return false;
         }
@@ -387,7 +408,7 @@ pub const Host = struct {
             self.stats.idle_iters += 1;
             var ev: sdl.SDL_Event = undefined;
             if (sdl.SDL_WaitEventTimeout(&ev, wait_ms)) {
-                if (translate(ev, @floatCast(self.scale))) |e| {
+                if (translate(ev, self.winToUi())) |e| {
                     if (on_event) |f| f(e);
                     if (!self.handleEvent(e)) return .quit;
                 }

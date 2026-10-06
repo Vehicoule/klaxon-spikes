@@ -612,3 +612,10 @@ BUILD-PROFILE.md) mesurée par device.sh.
 - `device.sh` : `am start -W` → `launch_wait_ms`/`launch_total_ms` injectés dans le résultat (latence OS tap-icon→affiché, process spawn compris — complément du ttff in-app).
 - Mesuré llvmpipe : vehicoule 131 ms, gallery médiane 179 ms (179/181/200) — sous 200 ms même en software.
 - Vérifs : gates 10 PASS + 1 SKIPPED ; zig build-obj android x86_64+aarch64 = 0 erreur.
+
+## Lot — V1.1 : échelle DPI réelle + fixtures embarquées (merge enfant Android)
+- `Host.dp` = densité px/dp (Android `SDL_GetWindowDisplayScale`, 1 ailleurs) ; helpers `winToUi()`/`uiToWin()` (iOS points↔px conserve, Android px↔dp). Layout apps en dp (viewport px/dp) + canvas ×dp ; events/IME/a11y convertis. `SDL_WINDOW_HIGH_PIXEL_DENSITY` posé. Bug repro `wm density 440` sans tel.
+- `SDLActivity.extractMusicAssetsOnce()` : assets/music-test → files/music au 1er boot (SharedPreferences) ; `--dir` défaut Android → `SDL_GetPrefPath`→files/music (`SDL_GetBasePath`=NULL Android).
+- Fixes merge : `s` shadowe `selected_slot` dans gallery draw → `d` ; gx/gy glass-card étaient en px dans le canvas scalé → vw/vh.
+- APK `vehicoule-v1.1-arm64.apk` 28,6 Mo (sha de0b5e0e…, cert identique) : install fraîche joue sans push, TalkBack bounds px exacts. a11y sync_begin : multiplicateur dp→px sur Android / diviseur px→pt Apple — paires shim+provider auto-cohérentes.
+- Vérifs : gates 10 PASS + 1 SKIPPED ; build-obj android x86_64+aarch64+gallery = 0 erreur.

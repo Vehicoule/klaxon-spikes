@@ -262,8 +262,9 @@ fn onFieldFocus(focused: bool, ctx: ?*anyopaque) void {
         // bounds en pixels ; SDL attend des coords fenêtre (points) → /scale
         // (Retina @2/@3 : sans ça la zone IME dérive d'un facteur scale).
         const b = gg.fld.node.bounds;
-        const s: f32 = @floatCast(@max(1.0, gg.host.scale));
-        const r = sdl.SDL_Rect{ .x = @intFromFloat(b.x / s), .y = @intFromFloat(b.y / s), .w = @intFromFloat(b.w / s), .h = @intFromFloat(b.h / s) };
+        // UI-units → window-units : iOS px→points (÷scale) ; Android dp→px (×dp).
+        const u: f32 = gg.host.uiToWin();
+        const r = sdl.SDL_Rect{ .x = @intFromFloat(b.x * u), .y = @intFromFloat(b.y * u), .w = @intFromFloat(b.w * u), .h = @intFromFloat(b.h * u) };
         _ = sdl.SDL_SetTextInputArea(gg.host.win, &r, 0);
     } else {
         _ = sdl.SDL_StopTextInput(gg.host.win);
@@ -429,7 +430,13 @@ fn draw(h: *k.Host) void {
             g.ime_watch_until = nowMs() + 2500;
         sampleIme();
     }
-    ui.layout(&g.root, .{ .x = 0, .y = -g.ime_shift, .w = @floatFromInt(pw), .h = @floatFromInt(ph) });
+    // Layout en dp : viewport = px/dp, canvas scalé ×dp (densité réelle —
+    // sans ça l'UI est ~dp× trop petite sur téléphone, mesuré).
+    const d: f32 = @floatCast(h.dp);
+    const vw: f32 = @as(f32, @floatFromInt(pw)) / d;
+    const vh: f32 = @as(f32, @floatFromInt(ph)) / d;
+    ui.layout(&g.root, .{ .x = 0, .y = -g.ime_shift, .w = vw, .h = vh });
+    if (d != 1.0) { _ = kx.kx_canvas_save(t); _ = kx.kx_canvas_scale(t, d, d); }
     _ = g.list.syncWindow();
     if (g.list.view_count > g.max_slots_used) g.max_slots_used = g.list.view_count;
     g.list.relayout();
@@ -449,8 +456,9 @@ fn draw(h: *k.Host) void {
     // iOS : gx=20 pour recouvrir le texte des items — le blur devient
     // visible ; ph-210 poserait la carte SOUS le viewport borné de la liste
     // (rien derrière → flou invisible) sur l'aspect 402×874 portrait.
-    const gx: f32 = if (comptime is_ios) 20 else @as(f32, @floatFromInt(@divTrunc(pw, 2) - 160));
-    const gy: f32 = if (comptime is_ios) @as(f32, @floatFromInt(@divTrunc(ph, 3))) else @as(f32, @floatFromInt(ph)) - 210;
+    // gx/gy en unités UI (dp si d>1) : le canvas est déjà scalé ×d.
+    const gx: f32 = if (comptime is_ios) 20 else vw / 2 - 160;
+    const gy: f32 = if (comptime is_ios) vh / 3 else vh - 210;
     // fBackdrop filtre dans le CLIP (pas fBounds — hint d'alloc seulement) :
     // clipper aux bounds arrondies avant le layer sinon le flou fuit partout.
     _ = kx.kx_canvas_save(t);
@@ -463,6 +471,7 @@ fn draw(h: *k.Host) void {
         _ = kx.kx_canvas_restore(t);
     }
     _ = kx.kx_canvas_restore(t);
+    if (d != 1.0) _ = kx.kx_canvas_restore(t);
     h.presentTarget();
 }
 
@@ -495,8 +504,10 @@ fn computeImeShift() f32 {
     // retrouver la position naturelle (stabilité — sinon oscillation 0↔873
     // mesurée par l'agent Android).
     const field_bottom = g.fld.node.bounds.y + g.fld.node.bounds.h + g.ime_shift;
+    // ime_bottom/view_bottom JNI sont en px écran → /dp (layout en dp).
+    const d: f32 = @floatCast(g.host.dp);
     const view_h = @as(f32, @floatFromInt(kx_view_bottom()));
-    return @max(0, field_bottom - (view_h - @as(f32, @floatFromInt(b))));
+    return @max(0, field_bottom - (view_h - @as(f32, @floatFromInt(b))) / d);
 }
 
 /// Trace l'évolution IME dans la fenêtre de veille (debug insets).

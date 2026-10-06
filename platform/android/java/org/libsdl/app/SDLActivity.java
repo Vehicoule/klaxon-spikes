@@ -472,6 +472,10 @@ public class SDLActivity extends Activity implements View.OnSystemUiVisibilityCh
         // ADR-0005 : MediaSession OS (lockscreen/notif/boutons média).
         KxMediaSession.install(this);
 
+        // V1.1 : bibliothèque embarquée — assets/music-test → files/music
+        // au premier lancement (scan natif lit --dir files/music).
+        extractMusicAssetsOnce();
+
         // Get our current screen orientation and pass it down.
         SDLActivity.nativeSetNaturalOrientation(SDLActivity.getNaturalOrientation());
         mCurrentRotation = SDLActivity.getCurrentRotation();
@@ -509,6 +513,36 @@ public class SDLActivity extends Activity implements View.OnSystemUiVisibilityCh
                 Log.v(TAG, "Got filename: " + filename);
                 SDLActivity.onNativeDropFile(filename);
             }
+        }
+    }
+
+    // Copie assets/music-test/* → files/music/* une seule fois
+    // (SharedPreferences flag). No-op si l'asset est absent (gallery).
+    private void extractMusicAssetsOnce() {
+        android.content.SharedPreferences p =
+            getSharedPreferences("kx_veh", MODE_PRIVATE);
+        if (p.getBoolean("music_extracted", false)) return;
+        try {
+            String[] names = getAssets().list("music-test");
+            if (names == null || names.length == 0) return;
+            java.io.File outDir = new java.io.File(getFilesDir(), "music");
+            if (!outDir.exists() && !outDir.mkdirs()) return;
+            byte[] buf = new byte[65536];
+            for (String name : names) {
+                java.io.InputStream in =
+                    getAssets().open("music-test/" + name);
+                java.io.File out = new java.io.File(outDir, name);
+                java.io.FileOutputStream fos =
+                    new java.io.FileOutputStream(out);
+                int n;
+                while ((n = in.read(buf)) > 0) fos.write(buf, 0, n);
+                fos.close();
+                in.close();
+            }
+            p.edit().putBoolean("music_extracted", true).apply();
+            Log.i(TAG, "extractMusicAssetsOnce: " + names.length + " tracks");
+        } catch (Exception e) {
+            Log.w(TAG, "extractMusicAssetsOnce: " + e);
         }
     }
 

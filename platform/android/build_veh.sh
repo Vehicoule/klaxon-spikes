@@ -11,6 +11,7 @@
 #   cp pluginhost/src/runtime.zig $PROJ/app/jni/src/ph/          # (ph_runtime module)
 #   cp platform/android/jni/*.cpp $PROJ/app/jni/src/
 #   cp platform/android/CMakeLists-vehicoule.txt $PROJ/app/jni/src/CMakeLists.txt
+#   cp -r vehicoule/music-test    $PROJ/app/src/main/assets/music-test  # fixtures embarquées (V1.1)
 # puis : scripts/build_veh.sh && apksigner sign (keystore local sideload)
 set -euo pipefail
 cd "$(dirname "$0")/.."

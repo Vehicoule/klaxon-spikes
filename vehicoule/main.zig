@@ -36,6 +36,7 @@ extern fn fopen(path: [*:0]const u8, mode: [*:0]const u8) ?*anyopaque;
 extern fn fwrite(ptr: [*]const u8, size: usize, n: usize, f: ?*anyopaque) usize;
 extern fn fclose(f: ?*anyopaque) c_int;
 extern fn SDL_GetBasePath() callconv(.c) ?[*:0]u8;
+extern fn SDL_GetPrefPath(org: [*:0]const u8, app: [*:0]const u8) callconv(.c) ?[*:0]u8;
 extern fn SDL_free(ptr: ?*anyopaque) callconv(.c) void;
 
 // actions figées côté glue : 0 play,1 pause,2 next,3 prev,4 seek(µs),5 stop.
@@ -511,10 +512,22 @@ fn draw(h: *k.Host) void {
     var pw: c_int = 0;
     var ph: c_int = 0;
     kx.kx_target_size(t, &pw, &ph);
-    ui.layout(&g.root, .{ .x = 0, .y = 0, .w = @floatFromInt(pw), .h = @floatFromInt(ph) });
+    // Layout en dp : viewport = px/dp, canvas scalé ×dp (densité réelle du
+    // device — sinon UI ~2.6× trop petite sur téléphone, mesuré).
+    const s: f32 = @floatCast(h.dp);
+    const vw: f32 = @as(f32, @floatFromInt(pw)) / s;
+    const vh: f32 = @as(f32, @floatFromInt(ph)) / s;
+    ui.layout(&g.root, .{ .x = 0, .y = 0, .w = vw, .h = vh });
     _ = g.list.syncWindow();
     g.list.relayout();
-    g.root.draw(t);
+    if (s != 1.0) {
+        _ = kx.kx_canvas_save(t);
+        _ = kx.kx_canvas_scale(t, s, s);
+        g.root.draw(t);
+        _ = kx.kx_canvas_restore(t);
+    } else {
+        g.root.draw(t);
+    }
     h.presentTarget();
 }
 
@@ -795,6 +808,19 @@ fn runApp(init: std.process.Init) !void {
             if (SDL_GetBasePath()) |bp| {
                 const joined = std.fmt.allocPrint(g.alloc, "{s}music-test",
                     .{std.mem.span(bp)}) catch null;
+                if (joined) |j| g.music_dir = j;
+            }
+        }
+    }
+    if (comptime is_android) {
+        if (std.mem.eql(u8, g.music_dir, "music-test")) {
+            // SDL_GetBasePath = NULL sur Android (cwd=/) — SDL_GetPrefPath =
+            // internalStoragePath + "/" = /data/data/<pkg>/files/ ; assets
+            // music-test extraits là-bas au 1er boot par SDLActivity.
+            if (SDL_GetPrefPath("vehicoule", "vehicoule")) |pp| {
+                defer SDL_free(pp);
+                const joined = std.fmt.allocPrint(g.alloc, "{s}music",
+                    .{std.mem.span(pp)}) catch null;
                 if (joined) |j| g.music_dir = j;
             }
         }

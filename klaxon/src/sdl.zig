@@ -168,6 +168,7 @@ pub extern fn SDL_DestroyWindow(w: ?*Window) void;
 pub extern fn SDL_GetWindowSize(w: ?*Window, w_out: [*c]c_int, h_out: [*c]c_int) bool;
 pub extern fn SDL_GetWindowID(w: ?*Window) u32;
 pub extern fn SDL_GetWindowSizeInPixels(w: ?*Window, w_out: [*c]c_int, h_out: [*c]c_int) bool;
+pub extern fn SDL_GetWindowDisplayScale(w: ?*Window) f32;
 pub extern fn SDL_GetWindowFlags(w: ?*Window) u64;
 pub const SDL_WINDOW_SHOWN_FLAG: u64 = 0x4; // SDL_WINDOW_SHOWN (SDL_WindowFlags Uint64)
 pub extern fn SDL_PollEvent(ev: ?*SDL_Event) bool;

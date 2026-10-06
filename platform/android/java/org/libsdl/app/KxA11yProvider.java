@@ -46,7 +46,10 @@ public class KxA11yProvider extends AccessibilityNodeProvider {
     }
 
     // ---- natives : shim → Java ----
+    private static float sScale = 1f;   // UI-units → px écran (dp sur Android)
+
     public static synchronized void onSyncBegin(float scale) {
+        sScale = scale > 0f ? scale : 1f;
         next.clear();
     }
 
@@ -57,7 +60,8 @@ public class KxA11yProvider extends AccessibilityNodeProvider {
         n.role = role;
         n.label = label != null ? label : "";
         n.hint = hint != null ? hint : "";
-        n.x = x; n.y = y; n.w = w; n.h = h;
+        // bounds UI (dp) → coords écran px (TalkBack exige des pixels).
+        n.x = x * sScale; n.y = y * sScale; n.w = w * sScale; n.h = h * sScale;
         n.flags = flags;
         n.parentId = parentId;
         next.put(id, n);
