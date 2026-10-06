@@ -619,3 +619,10 @@ BUILD-PROFILE.md) mesurée par device.sh.
 - Fixes merge : `s` shadowe `selected_slot` dans gallery draw → `d` ; gx/gy glass-card étaient en px dans le canvas scalé → vw/vh.
 - APK `vehicoule-v1.1-arm64.apk` 28,6 Mo (sha de0b5e0e…, cert identique) : install fraîche joue sans push, TalkBack bounds px exacts. a11y sync_begin : multiplicateur dp→px sur Android / diviseur px→pt Apple — paires shim+provider auto-cohérentes.
 - Vérifs : gates 10 PASS + 1 SKIPPED ; build-obj android x86_64+aarch64+gallery = 0 erreur.
+
+## 2026-10-06 — Audit APK v1.1 + feedback plan v18 absorbé
+- Audit réel v1.1 (28,6 Mo) : lib/ 24,0 Mo (84 %) — libmain ×2 ABI 17,3 + libSDL3 ×2 6,7 — assets fixtures 4,4 Mo (3 WAV 8 s = 4,2). Chemin gate <12 : arm64-only + fixtures courtes + SDL3 trim. BUILD-PROFILE §2ter.
+- Fixtures WAV tronquées 8 s→2 s (déterministe, couverture wav conservée) — commit 797b9a9.
+- Enfant Android redispatché : APK slim arm64-only cible <12 Mo + SDL3 allégé.
+- WATCH ITEM ajouté : les fixtures embarquées = contenu DÉMO, pas le fix de bibliothèque vide — le vrai scanner de musique utilisateur passe par MediaStore/SAF + READ_MEDIA_AUDIO (Android 13+) — à planifier V1.x/V2.
+- WATCH ITEM (v18) : RSS ~310 Mo sim-Metal = à isoler par ledger (plancher renderer/driver vs delta Klaxon), aucun seuil calibré dessus ; TTFF 131 ms software → réarmer plus serré (<100 ms ?) après mesure device.
