@@ -5,6 +5,7 @@
 
 #include "kx_skia.h"
 
+#include <cstdint>
 #include <vector>
 #include "include/core/SkSurface.h"
 #include "include/core/SkImage.h"
@@ -15,6 +16,14 @@ class SkString;
 
 // Swapchain Dawn onscreen (Windows) — définie dans kx_skia_win.cpp.
 struct kx_dawn_surface;
+
+// Image swapchain graphite-vulkan (android) : surface pré-wrapée +
+// semaphore de fin de rendu persistant (réutilisé à chaque acquire de
+// cette image — consommé par le present).
+struct kx_vkimg {
+    sk_sp<SkSurface> surf;
+    uint64_t render_sem = 0; // VkSemaphore
+};
 
 struct kx_target {
     kx_ctx* ctx = nullptr;  // non possédé
@@ -31,6 +40,13 @@ struct kx_target {
     // onscreen Dawn (Windows) : swapchain WebGPU par HWND ; surface Skia
     // réacquise par frame, libérée après Present.
     kx_dawn_surface* dawn = nullptr;
+    // onscreen graphite-vulkan (android) : swapchain + images ; surface
+    // active posée à l'acquire, reset après present. VkSurfaceKHR et
+    // VkDevice possédés par le ctx — pas par la cible.
+    uint64_t vk_swapchain = 0; // VkSwapchainKHR
+    std::vector<kx_vkimg> vk_imgs;
+    uint32_t vk_img_idx = 0;
+    uint64_t vk_acquire_sem = 0; // VkSemaphore signalé par l'Acquire courant
 };
 
 // Internes implémentés dans kx_skia_linux.cpp.

@@ -720,6 +720,9 @@ fn setup(font_data: []const u8) !void {
         // macOS : graphite-metal onscreen via SDL_Metal_CreateView→CAMetalLayer
         // (chemin prouvé K1-mac ; pas de GL accéléré dispo partout).
         try k.Host.initMetalWindow(g.io, "Klaxon Gallery", 900, 700)
+    else if (comptime is_android)
+        // Graphite-vulkan primaire, fallback interne vers ganesh-GLES.
+        try k.Host.initAndroidWindow(g.io, "Klaxon Gallery", 900, 700)
     else
         try k.Host.initGlWindow(g.io, "Klaxon Gallery", 900, 700);
     _ = kx.kx_fonts_add(g.host.fonts, font_data.ptr, font_data.len);

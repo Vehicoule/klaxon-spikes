@@ -41,6 +41,10 @@ kx_ctx* kx_ctx_create_ganesh_gl_current(kx_gl_getproc get_proc);
 /* Cible onscreen GL : wrappe le framebuffer 0 (fenêtre). Recréer après resize. */
 kx_target* kx_target_onscreen_gl(kx_ctx*, int w, int h);
 kx_ctx* kx_ctx_create_graphite_vulkan(void);
+/* VkInstance du ctx (backend graphite-vulkan seulement), à passer à
+   SDL_Vulkan_CreateSurface pour obtenir le VkSurfaceKHR onscreen.
+   NULL hors backend vulkan. */
+void* kx_ctx_vk_instance(const kx_ctx*);
 kx_ctx* kx_ctx_create_graphite_metal(void);
 kx_ctx* kx_ctx_create_graphite_dawn(void);
 kx_ctx* kx_ctx_create_graphite_dawn_d3d12(void);
@@ -49,6 +53,11 @@ kx_ctx* kx_ctx_create_graphite_dawn_vulkan(void);
    (HWND Windows, CAMetalLayer macOS, ANativeWindow Android).
    Recreer apres resize. */
 kx_target* kx_target_onscreen_dawn(kx_ctx*, void* native_handle, int w, int h);
+/* Cible onscreen graphite-vulkan : swapchain sur un VkSurfaceKHR créé par
+   l'hôte (SDL_Vulkan_CreateSurface). Le ctx adopte la surface passée
+   (détruite dans kx_ctx_free) ; vk_surface=NULL réutilise celle du ctx
+   (recréation au resize). Recréer après resize. */
+kx_target* kx_target_onscreen_vulkan(kx_ctx*, void* vk_surface, int w, int h);
 /* Cible onscreen Metal (macOS/iOS) : CAMetalLayer — drawable acquis par frame,
    scale = contentsScale (<=0 : valeur courante du layer). */
 kx_target* kx_target_onscreen_metal(kx_ctx*, void* ca_metal_layer, int w, int h, double scale);

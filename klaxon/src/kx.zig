@@ -48,6 +48,11 @@ pub extern fn kx_target_canvas(ctx: ?*Ctx, canvas_selector: [*c]const u8, w: c_i
 /// (HWND Windows, CAMetalLayer macOS, ANativeWindow Android).
 pub extern fn kx_target_onscreen_dawn(ctx: ?*Ctx, native_handle: ?*anyopaque, w: c_int, h: c_int) ?*Target;
 pub extern fn kx_target_onscreen_metal(ctx: ?*Ctx, ca_metal_layer: ?*anyopaque, w: c_int, h: c_int, scale: f64) ?*Target;
+/// Cible onscreen graphite-vulkan : vk_surface = VkSurfaceKHR créée par
+/// SDL_Vulkan_CreateSurface ; NULL réutilise la surface du ctx (resize).
+pub extern fn kx_target_onscreen_vulkan(ctx: ?*Ctx, vk_surface: ?*anyopaque, w: c_int, h: c_int) ?*Target;
+/// VkInstance du ctx graphite-vulkan (NULL ailleurs).
+pub extern fn kx_ctx_vk_instance(ctx: ?*const Ctx) ?*anyopaque;
 
 // ---- Accessibilité (impl kx_a11y.mm — Apple seulement ; appels gated
 // comptime côté Zig, aucun extern émis ailleurs) ----------------------------

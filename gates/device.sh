@@ -85,7 +85,10 @@ run_scene() { # nom, kx_args, fichier stats → JSON ligne (ou vide)
     # -W : attend l'activité affichée → WaitTime ≈ tap-icon→1re frame,
     # complément OS au ttff_ms in-app (process spawn compris).
     local start_out wait_ms total_ms
-    start_out=$($ADB shell am start -W -n "$PKG/.SDLActivity" --es kx_args "$args" 2>&1)
+    # kx_args = UNE chaîne avec espaces : guillemets simples internes
+    # (le shell distant redécoupe — sinon am lit --dir comme valeur et
+    # le path comme composant → scène jamais lancée, stats jamais écrits).
+    start_out=$($ADB shell am start -W -n "$PKG/.SDLActivity" --es kx_args "'$args'" 2>&1)
     wait_ms=$(echo "$start_out" | sed -n 's/.*WaitTime: \([0-9]*\).*/\1/p' | tail -1)
     total_ms=$(echo "$start_out" | sed -n 's/.*TotalTime: \([0-9]*\).*/\1/p' | tail -1)
     # stats périodiques depuis v1.4 : on accumule la dernière émission et

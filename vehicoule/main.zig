@@ -15,6 +15,7 @@ const natives = runtime.host_natives;
 const Policy = runtime.Policy;
 
 const SLOTS = 64;
+const TAP_SLOP: f32 = 12; // dp (≈ ViewConfiguration touch slop)
 const TILE_PX = 52;
 
 const media_source = audio.media_source;
@@ -131,8 +132,11 @@ const G = struct {
     running: bool = true,
     frames: i64 = 0,
     ticks: i64 = 0,
-    taps: i64 = 0,
+    ev_down: i64 = 0,
+    ev_up: i64 = 0,
+    ev_move: i64 = 0,
     hits: i64 = 0,
+    ptr_down: ?[2]f32 = null,
     max_frames: i64 = -1,
     deadline_ms: i64 = -1,
     dirty_extra: bool = true,
@@ -441,7 +445,8 @@ fn onEvent(e: k.Event) void {
             const ev = ui.PointerEvent{ .kind = .down, .x = p.x, .y = p.y, .button = p.button };
             _ = ui.dispatchScrollable(&g.root, ev);
             const hit = ui.dispatch(&g.root, ev);
-            g.taps += 1;
+            g.ev_down += 1;
+            g.ptr_down = .{ p.x, p.y };
             if (hit) |h| {
                 g.hits += 1;
                 g.focus.set(if (h.semantics.focusable) h else null);
@@ -451,13 +456,23 @@ fn onEvent(e: k.Event) void {
         .pointer_up => |p| {
             const ev = ui.PointerEvent{ .kind = .up, .x = p.x, .y = p.y, .button = p.button };
             _ = ui.dispatchScrollable(&g.root, ev);
-            _ = ui.dispatch(&g.root, ev);
+            g.ev_up += 1;
+            // geste-arbitrage : un up après un déplacement > slop était un
+            // drag, pas un tap — sinon chaque fin de swipe joue la ligne
+            // sous le doigt.
+            const moved = if (g.ptr_down) |d|
+                @abs(p.x - d[0]) + @abs(p.y - d[1]) > TAP_SLOP
+            else
+                false;
+            g.ptr_down = null;
+            if (!moved) _ = ui.dispatch(&g.root, ev);
             g.dirty_extra = true;
         },
         .pointer_move => |p| {
             const ev = ui.PointerEvent{ .kind = .move, .x = p.x, .y = p.y };
             _ = ui.dispatchScrollable(&g.root, ev);
             _ = ui.dispatch(&g.root, ev);
+            g.ev_move += 1;
             g.dirty_extra = true;
         },
         .wheel => |p| {
@@ -673,14 +688,14 @@ fn tick() void {
 fn emitStats() void {
     var sbuf: [640]u8 = undefined;
     const line = std.fmt.bufPrint(&sbuf,
-        "{{\"tool\":\"vehicoule-v0\",\"backend\":\"{s}\",\"driver\":\"{s}\",\"frames\":{},\"avg_ms\":{d:.3},\"p99_ms\":{d:.3},\"pacing_p99_ms\":{d:.3},\"first_frame_ms\":{d:.3},\"ttff_ms\":{d:.3},\"tracks\":{},\"state\":\"{s}\",\"pos\":{d:.1},\"fed\":{},\"queued\":{},\"media_cmds\":{},\"taps\":{},\"hits\":{},\"peak_rss_mb\":{d:.1}}}\n",
+        "{{\"tool\":\"vehicoule-v0\",\"backend\":\"{s}\",\"driver\":\"{s}\",\"frames\":{},\"avg_ms\":{d:.3},\"p99_ms\":{d:.3},\"pacing_p99_ms\":{d:.3},\"first_frame_ms\":{d:.3},\"ttff_ms\":{d:.3},\"tracks\":{},\"state\":\"{s}\",\"pos\":{d:.1},\"fed\":{},\"queued\":{},\"media_cmds\":{},\"ev\":[{},{},{}],\"hits\":{},\"peak_rss_mb\":{d:.1}}}\n",
         .{ @tagName(g.host.backend()), g.host.driverInfo(),
            g.host.stats.frames, g.host.stats.avgFrameMs(), g.host.stats.p99FrameMs(),
            g.host.stats.p99IntervalMs(),
            g.host.stats.first_frame_ms, g.host.stats.ttff_ms, g.queue.len(),
            @tagName(g.engine.state), @as(f64, @floatFromInt(g.engine.positionUs())) / 1e6,
            g.engine.fed_frames, g.engine.queuedBytes(), g.media_cmds,
-           g.taps, g.hits,
+           g.ev_down, g.ev_up, g.ev_move, g.hits,
            @as(f64, @floatFromInt(k.Stats.peakRssKb())) / 1024.0 }) catch "";
     std.debug.print("{s}", .{line});
     if (comptime is_mobile) { // stderr invisible → stats via fichier sandbox
@@ -724,6 +739,9 @@ fn setup(font_data: []const u8) !void {
         try k.Host.initMetalWindow(g.io, "Vehicoule", 402, 874)
     else if (comptime builtin.os.tag == .macos)
         try k.Host.initMetalWindow(g.io, "Vehicoule", 900, 640)
+    else if (comptime is_android)
+        // Graphite-vulkan primaire, fallback interne vers ganesh-GLES.
+        try k.Host.initAndroidWindow(g.io, "Vehicoule", 900, 640)
     else
         try k.Host.initGlWindow(g.io, "Vehicoule", 900, 640);
     _ = kx.kx_fonts_add(g.host.fonts, font_data.ptr, @intCast(font_data.len));

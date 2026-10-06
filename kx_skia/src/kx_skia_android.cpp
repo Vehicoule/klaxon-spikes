@@ -43,6 +43,13 @@
 #include "include/gpu/ganesh/gl/GrGLDirectContext.h"
 #include "include/gpu/ganesh/gl/GrGLFunctions.h"
 #include "include/gpu/ganesh/gl/GrGLInterface.h"
+#include "include/gpu/graphite/BackendSemaphore.h"
+#include "include/gpu/graphite/BackendTexture.h"
+#include <android/log.h>
+// fprintf(stderr) est invisible sur Android (stderr non routé logcat) —
+// les bails silencieux de l'init vulkan logguent ici, utile au diagnostic
+// sur device réel autant qu'émulateur.
+#define KXVKLOG(...) __android_log_print(ANDROID_LOG_ERROR, "kx-vk", __VA_ARGS__)
 #include "include/gpu/graphite/Context.h"
 #include "include/gpu/graphite/ContextOptions.h"
 #include "include/gpu/graphite/GraphiteTypes.h"
@@ -56,9 +63,12 @@
 #include "include/gpu/graphite/vk/VulkanGraphiteTypes.h"
 #include "include/gpu/vk/VulkanBackendContext.h"
 #include "include/gpu/vk/VulkanExtensions.h"
+#include "include/gpu/vk/VulkanMutableTextureState.h"
 #include "include/gpu/vk/VulkanPreferredFeatures.h"
 #include "include/ports/SkFontMgr_empty.h"
 #include "modules/skparagraph/include/FontCollection.h"
+#include "src/gpu/graphite/TextureFormat.h"
+#include "src/gpu/graphite/vk/VulkanGraphiteUtils.h"
 #include "src/gpu/vk/VulkanInterface.h"
 #include "src/gpu/vk/vulkanmemoryallocator/VulkanAMDMemoryAllocator.h"
 
@@ -282,6 +292,11 @@ struct kx_ctx {
     std::unique_ptr<skgpu::graphite::Context> gctx;
     std::unique_ptr<skgpu::graphite::Recorder> recorder;
     std::deque<std::unique_ptr<skgpu::graphite::Recording>> recordings;
+    // onscreen : swapchain possible seulement si VK_KHR_swapchain était
+    // dans les extensions device ; la VkSurfaceKHR est adoptée par le ctx
+    // à la création de la cible onscreen (une par process).
+    bool vk_has_swapchain = false;
+    VkSurfaceKHR vk_surface = VK_NULL_HANDLE;
 
     sk_sp<SkImage> corpus_img;
 };
@@ -395,6 +410,21 @@ kx_ctx* kx_ctx_create_graphite_vulkan() {
     }
     std::vector<const char*> wantInst;
     skiaFeat.addToInstanceExtensions(instExts.data(), instExts.size(), wantInst);
+    // Onscreen : surface+swapchain ne sont pas demandées par Skia (il ne
+    // présente pas) — ajoutées ici si énumérées, la cible valide ensuite.
+    bool want_khr_surface = false, want_android_surface = false;
+    for (const auto& e : instExts) {
+        if (!strcmp(e.extensionName, VK_KHR_SURFACE_EXTENSION_NAME)) want_khr_surface = true;
+        if (!strcmp(e.extensionName, "VK_KHR_android_surface")) want_android_surface = true;
+    }
+    auto have_inst = [&](const char* n) {
+        return std::any_of(wantInst.begin(), wantInst.end(),
+                           [&](const char* s) { return !strcmp(s, n); });
+    };
+    if (want_khr_surface && !have_inst(VK_KHR_SURFACE_EXTENSION_NAME))
+        wantInst.push_back(VK_KHR_SURFACE_EXTENSION_NAME);
+    if (want_android_surface && !have_inst("VK_KHR_android_surface"))
+        wantInst.push_back("VK_KHR_android_surface");
 
     VkApplicationInfo app = {};
     app.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
@@ -405,7 +435,9 @@ kx_ctx* kx_ctx_create_graphite_vulkan() {
     ici.pApplicationInfo = &app;
     ici.enabledExtensionCount = (uint32_t)wantInst.size();
     ici.ppEnabledExtensionNames = wantInst.data();
-    if (pfnCreateInstance(&ici, nullptr, &c->vk_inst) != VK_SUCCESS) {
+    VkResult inst_res = pfnCreateInstance(&ici, nullptr, &c->vk_inst);
+    if (inst_res != VK_SUCCESS) {
+        KXVKLOG("vkCreateInstance -> %d", (int)inst_res);
         delete c;
         return nullptr;
     }
@@ -416,7 +448,7 @@ kx_ctx* kx_ctx_create_graphite_vulkan() {
         c->vk_inst, "vkEnumeratePhysicalDevices");
     uint32_t nPhys = 0;
     pfnEnumPhys(c->vk_inst, &nPhys, nullptr);
-    if (!nPhys) { delete c; return nullptr; }
+    if (!nPhys) { KXVKLOG("aucun physical device vulkan"); delete c; return nullptr; }
     std::vector<VkPhysicalDevice> phys(nPhys);
     pfnEnumPhys(c->vk_inst, &nPhys, phys.data());
 
@@ -485,6 +517,12 @@ kx_ctx* kx_ctx_create_graphite_vulkan() {
 
     std::vector<const char*> wantDev;
     skiaFeat.addFeaturesToEnable(wantDev, feat2);
+    for (const auto& e : devExts)
+        if (!strcmp(e.extensionName, VK_KHR_SWAPCHAIN_EXTENSION_NAME)) {
+            wantDev.push_back(VK_KHR_SWAPCHAIN_EXTENSION_NAME);
+            c->vk_has_swapchain = true;
+            break;
+        }
 
     float prio = 1.f;
     VkDeviceQueueCreateInfo qi = {};
@@ -556,6 +594,312 @@ kx_ctx* kx_ctx_create_graphite_vulkan() {
     return c;
 }
 
+void* kx_ctx_vk_instance(const kx_ctx* c) {
+    return (c && c->vk_inst != VK_NULL_HANDLE) ? (void*)c->vk_inst : nullptr;
+}
+
+// ---- onscreen vulkan : VkSurfaceKHR + swapchain + acquire/present -----------
+// Journal de chemin d'échec : fprintf(stderr) est invisible sur Android
+// (pas de redirection logcat) — les bails silencieux logguent ici, utile
+// au diagnostic sur device réel autant qu'émulateur.
+namespace {
+
+PFN_vkVoidFunction vk_iproc(VkInstance i, const char* n) {
+    return g_gipa ? g_gipa(i, n) : nullptr;
+}
+PFN_vkVoidFunction vk_dproc(VkDevice d, const char* n) {
+    return (g_gdpa && d != VK_NULL_HANDLE) ? g_gdpa(d, n) : nullptr;
+}
+
+void vk_target_teardown(kx_ctx* c, kx_target* t) {
+    auto devIdle = (PFN_vkDeviceWaitIdle)vk_dproc(c->vk_dev, "vkDeviceWaitIdle");
+    auto destroySem = (PFN_vkDestroySemaphore)vk_dproc(c->vk_dev, "vkDestroySemaphore");
+    auto destroySw = (PFN_vkDestroySwapchainKHR)vk_dproc(c->vk_dev, "vkDestroySwapchainKHR");
+    if (devIdle) devIdle(c->vk_dev);
+    for (auto& img : t->vk_imgs) {
+        img.surf.reset();
+        if (img.render_sem && destroySem)
+            destroySem(c->vk_dev, (VkSemaphore)img.render_sem, nullptr);
+    }
+    t->vk_imgs.clear();
+    if (t->vk_acquire_sem && destroySem) {
+        destroySem(c->vk_dev, (VkSemaphore)t->vk_acquire_sem, nullptr);
+        t->vk_acquire_sem = 0;
+    }
+    if (t->vk_swapchain && destroySw) {
+        destroySw(c->vk_dev, (VkSwapchainKHR)t->vk_swapchain, nullptr);
+        t->vk_swapchain = 0;
+    }
+    t->surface.reset();
+}
+
+// Création swapchain + wrap des images (miroir du pattern
+// GraphiteNativeVulkanWindowContext de Skia). Sémaphore de rendu persistant
+// par image ; acquire semaphore créé par frame dans kx_acquire_surface.
+bool vk_target_swapchain(kx_ctx* c, kx_target* t, int w, int h) {
+    auto capsP = (PFN_vkGetPhysicalDeviceSurfaceCapabilitiesKHR)vk_iproc(
+        c->vk_inst, "vkGetPhysicalDeviceSurfaceCapabilitiesKHR");
+    auto fmtsP = (PFN_vkGetPhysicalDeviceSurfaceFormatsKHR)vk_iproc(
+        c->vk_inst, "vkGetPhysicalDeviceSurfaceFormatsKHR");
+    auto modesP = (PFN_vkGetPhysicalDeviceSurfacePresentModesKHR)vk_iproc(
+        c->vk_inst, "vkGetPhysicalDeviceSurfacePresentModesKHR");
+    auto createSw = (PFN_vkCreateSwapchainKHR)vk_dproc(c->vk_dev, "vkCreateSwapchainKHR");
+    auto getImgs = (PFN_vkGetSwapchainImagesKHR)vk_dproc(c->vk_dev, "vkGetSwapchainImagesKHR");
+    auto createSem = (PFN_vkCreateSemaphore)vk_dproc(c->vk_dev, "vkCreateSemaphore");
+    if (!capsP || !fmtsP || !modesP || !createSw || !getImgs || !createSem) {
+        KXVKLOG("onscreen: procs swapchain manquants");
+        return false;
+    }
+
+    VkSurfaceCapabilitiesKHR caps = {};
+    if (capsP(c->vk_phys, c->vk_surface, &caps) != VK_SUCCESS) {
+        KXVKLOG("onscreen: GetPhysicalDeviceSurfaceCapabilities a échoué");
+        return false;
+    }
+    VkExtent2D extent = caps.currentExtent;
+    if (extent.width == 0xFFFFFFFF) {
+        extent.width = (uint32_t)(w > 0 ? w : 1);
+        extent.height = (uint32_t)(h > 0 ? h : 1);
+    }
+    extent.width = std::max(caps.minImageExtent.width,
+                            std::min(caps.maxImageExtent.width, extent.width));
+    extent.height = std::max(caps.minImageExtent.height,
+                             std::min(caps.maxImageExtent.height, extent.height));
+
+    uint32_t nf = 0;
+    fmtsP(c->vk_phys, c->vk_surface, &nf, nullptr);
+    std::vector<VkSurfaceFormatKHR> fmts(nf);
+    fmtsP(c->vk_phys, c->vk_surface, &nf, fmts.data());
+    VkFormat format = VK_FORMAT_UNDEFINED;
+    VkColorSpaceKHR colorSpace = VK_COLORSPACE_SRGB_NONLINEAR_KHR;
+    for (auto& f : fmts) {
+        auto tf = skgpu::graphite::VkFormatToTextureFormat(f.format);
+        // sRGB rejeté comme le viewer Skia (le ColorSpace SRGB suffit au
+        // gamma ; les formats *SRGB exigeraient un gamut linéaire).
+        if (tf != skgpu::graphite::TextureFormat::kUnsupported &&
+            tf != skgpu::graphite::TextureFormat::kRGBA8_sRGB &&
+            tf != skgpu::graphite::TextureFormat::kBGRA8_sRGB) {
+            format = f.format;
+            colorSpace = f.colorSpace;
+            break;
+        }
+    }
+    if (format == VK_FORMAT_UNDEFINED) {
+        KXVKLOG("onscreen: aucun format de surface rendable");
+        return false;
+    }
+
+    uint32_t nm = 0;
+    modesP(c->vk_phys, c->vk_surface, &nm, nullptr);
+    std::vector<VkPresentModeKHR> modes(nm);
+    modesP(c->vk_phys, c->vk_surface, &nm, modes.data());
+    // FIFO (vsync, garanti) — aligne le pacing stats sur SwapInterval(1).
+    VkPresentModeKHR presentMode = VK_PRESENT_MODE_FIFO_KHR;
+
+    uint32_t imageCount = caps.minImageCount + 1;
+    if (caps.maxImageCount && imageCount > caps.maxImageCount)
+        imageCount = caps.maxImageCount;
+
+    VkImageUsageFlags usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
+                              VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+                              VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+    // INPUT_ATTACHMENT est obligatoire : VulkanCaps::getTextureUsage n'y
+    // voit une texture renderable qu'avec COLOR_ATTACHMENT+INPUT_ATTACHMENT.
+    if (caps.supportedUsageFlags & VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT)
+        usage |= VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT;
+    if (caps.supportedUsageFlags & VK_IMAGE_USAGE_SAMPLED_BIT)
+        usage |= VK_IMAGE_USAGE_SAMPLED_BIT;
+
+    VkCompositeAlphaFlagBitsKHR composite =
+        (caps.supportedCompositeAlpha & VK_COMPOSITE_ALPHA_INHERIT_BIT_KHR)
+            ? VK_COMPOSITE_ALPHA_INHERIT_BIT_KHR
+            : VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
+
+    VkSwapchainCreateInfoKHR sci = {};
+    sci.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
+    sci.surface = c->vk_surface;
+    sci.minImageCount = imageCount;
+    sci.imageFormat = format;
+    sci.imageColorSpace = colorSpace;
+    sci.imageExtent = extent;
+    sci.imageArrayLayers = 1;
+    sci.imageUsage = usage;
+    sci.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    sci.preTransform = caps.currentTransform;
+    sci.compositeAlpha = composite;
+    sci.presentMode = presentMode;
+    sci.clipped = VK_TRUE;
+    if (createSw(c->vk_dev, &sci, nullptr, (VkSwapchainKHR*)&t->vk_swapchain) !=
+        VK_SUCCESS) {
+        KXVKLOG("onscreen: vkCreateSwapchainKHR a échoué");
+        return false;
+    }
+
+    uint32_t n = 0;
+    getImgs(c->vk_dev, (VkSwapchainKHR)t->vk_swapchain, &n, nullptr);
+    std::vector<VkImage> imgs(n);
+    getImgs(c->vk_dev, (VkSwapchainKHR)t->vk_swapchain, &n, imgs.data());
+    for (uint32_t i = 0; i < n; ++i) {
+        VkSemaphoreCreateInfo si = {VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
+                                    nullptr, 0};
+        VkSemaphore sem = VK_NULL_HANDLE;
+        if (createSem(c->vk_dev, &si, nullptr, &sem) != VK_SUCCESS) return false;
+        skgpu::graphite::VulkanTextureInfo info;
+        info.fFormat = format;
+        info.fImageUsageFlags = usage;
+        auto bt = skgpu::graphite::BackendTextures::MakeVulkan(
+            {(int)extent.width, (int)extent.height}, info,
+            VK_IMAGE_LAYOUT_UNDEFINED, c->vk_qidx, imgs[i],
+            skgpu::VulkanAlloc());
+        auto surf = SkSurfaces::WrapBackendTexture(
+            c->recorder.get(), bt, SkColorSpace::MakeSRGB(), nullptr);
+        if (!surf) {
+            KXVKLOG("onscreen: WrapBackendTexture null (img %u)", i);
+            return false;
+        }
+        kx_vkimg vi;
+        vi.surf = std::move(surf);
+        vi.render_sem = (uint64_t)sem;
+        t->vk_imgs.push_back(std::move(vi));
+    }
+    t->w = (int)extent.width;
+    t->h = (int)extent.height;
+    return true;
+}
+
+}  // namespace
+
+kx_target* kx_target_onscreen_vulkan(kx_ctx* c, void* vk_surface, int w, int h) {
+    if (!c || c->backend != KX_BACKEND_GRAPHITE_VULKAN) {
+        KXVKLOG("onscreen: ctx absent ou non-vulkan");
+        return nullptr;
+    }
+    if (!c->vk_has_swapchain) {
+        KXVKLOG("onscreen: VK_KHR_swapchain absent du device");
+        return nullptr;
+    }
+    if (vk_surface) {
+        // Une surface différente de celle détenue : détruire l'ancienne.
+        if (c->vk_surface != VK_NULL_HANDLE && c->vk_surface != vk_surface) {
+            auto d = (PFN_vkDestroySurfaceKHR)vk_iproc(c->vk_inst, "vkDestroySurfaceKHR");
+            if (d) d(c->vk_inst, c->vk_surface, nullptr);
+        }
+        c->vk_surface = (VkSurfaceKHR)vk_surface;
+    }
+    if (c->vk_surface == VK_NULL_HANDLE) {
+        KXVKLOG("onscreen: VkSurfaceKHR null");
+        return nullptr;
+    }
+
+    // La queue graphique choisie doit aussi présenter sur cette surface.
+    auto supP = (PFN_vkGetPhysicalDeviceSurfaceSupportKHR)vk_iproc(
+        c->vk_inst, "vkGetPhysicalDeviceSurfaceSupportKHR");
+    VkBool32 supported = VK_FALSE;
+    if (supP) supP(c->vk_phys, c->vk_qidx, c->vk_surface, &supported);
+    if (!supported) {
+        fprintf(stderr, "[kx] vulkan: queue %u ne sait pas présenter\n", c->vk_qidx);
+        return nullptr;
+    }
+
+    auto* t = new kx_target();
+    t->ctx = c;
+    t->onscreen = true;
+    if (!vk_target_swapchain(c, t, w, h)) {
+        vk_target_teardown(c, t);
+        delete t;
+        return nullptr;
+    }
+    return t;
+}
+
+// Acquire de la prochaine image — appelé paresseusement par
+// kx_target_canvas_ready (1er canvas demandé de la frame).
+int kx_vk_acquire(kx_target* t) {
+    if (t->surface) return 0; // déjà acquis cette frame
+    auto* c = t->ctx;
+    auto createSem = (PFN_vkCreateSemaphore)vk_dproc(c->vk_dev, "vkCreateSemaphore");
+    auto acquire = (PFN_vkAcquireNextImageKHR)vk_dproc(c->vk_dev, "vkAcquireNextImageKHR");
+    if (!createSem || !acquire || t->vk_imgs.empty()) return -1;
+    VkSemaphore sem = VK_NULL_HANDLE;
+    VkSemaphoreCreateInfo si = {VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
+                                nullptr, 0};
+    if (createSem(c->vk_dev, &si, nullptr, &sem) != VK_SUCCESS) return -1;
+    VkResult r = acquire(c->vk_dev, (VkSwapchainKHR)t->vk_swapchain,
+                         UINT64_MAX, sem, VK_NULL_HANDLE, &t->vk_img_idx);
+    if (r != VK_SUCCESS && r != VK_SUBOPTIMAL_KHR) {
+        // OUT_OF_DATE / SURFACE_LOST : l'hôte recrée la cible au prochain
+        // resize — le frame de transition saute simplement.
+        auto destroySem = (PFN_vkDestroySemaphore)vk_dproc(c->vk_dev, "vkDestroySemaphore");
+        if (destroySem) destroySem(c->vk_dev, sem, nullptr);
+        return -1;
+    }
+    t->vk_acquire_sem = (uint64_t)sem;
+    t->surface = t->vk_imgs[t->vk_img_idx].surf;
+    return 0;
+}
+
+// Present : snap du recorder + insertRecording (wait=acquire, signal=render,
+// transition finale → PRESENT_SRC_KHR) + submit async + queuePresent.
+int kx_vk_present(kx_ctx* c, kx_target* t) {
+    if (!t->surface || !t->vk_acquire_sem) return -1;
+    auto rec = c->recorder->snap();
+    auto destroySem = (PFN_vkDestroySemaphore)vk_dproc(c->vk_dev, "vkDestroySemaphore");
+    if (!rec) {
+        // rien d'enregistré : libérer le semaphore d'acquire (pas de
+        // finishedProc pour le consommer).
+        if (destroySem) destroySem(c->vk_dev, (VkSemaphore)t->vk_acquire_sem, nullptr);
+        t->vk_acquire_sem = 0;
+        t->surface.reset();
+        return 0;
+    }
+    auto present = (PFN_vkQueuePresentKHR)vk_dproc(c->vk_dev, "vkQueuePresentKHR");
+    if (!present) return -1;
+
+    skgpu::graphite::InsertRecordingInfo info = {};
+    info.fRecording = rec.get();
+    info.fTargetSurface = t->surface.get();
+    skgpu::MutableTextureState presentState = skgpu::MutableTextureStates::MakeVulkan(
+        VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, c->vk_qidx);
+    info.fTargetTextureState = &presentState;
+    info.fNumWaitSemaphores = 1;
+    auto waitSem = skgpu::graphite::BackendSemaphores::MakeVulkan(
+        (VkSemaphore)t->vk_acquire_sem);
+    info.fWaitSemaphores = &waitSem;
+    info.fNumSignalSemaphores = 1;
+    auto sigSem = skgpu::graphite::BackendSemaphores::MakeVulkan(
+        (VkSemaphore)t->vk_imgs[t->vk_img_idx].render_sem);
+    info.fSignalSemaphores = &sigSem;
+    // L'acquire semaphore est détruit une fois le wait GPU consommé.
+    struct Fin {
+        VkDevice dev;
+        PFN_vkDestroySemaphore pfn;
+        VkSemaphore sem;
+    };
+    info.fFinishedContext = new Fin{c->vk_dev, destroySem, (VkSemaphore)t->vk_acquire_sem};
+    info.fFinishedProc = [](skgpu::graphite::GpuFinishedContext fc,
+                            skgpu::CallbackResult) {
+        const auto* f = reinterpret_cast<const Fin*>(fc);
+        if (f->pfn) f->pfn(f->dev, f->sem, nullptr);
+        delete f;
+    };
+    c->gctx->insertRecording(info);
+    c->gctx->submit(skgpu::graphite::SyncToCpu::kNo);
+
+    VkSemaphore rsem = (VkSemaphore)t->vk_imgs[t->vk_img_idx].render_sem;
+    VkSwapchainKHR sw = (VkSwapchainKHR)t->vk_swapchain;
+    VkPresentInfoKHR pi = {};
+    pi.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+    pi.waitSemaphoreCount = 1;
+    pi.pWaitSemaphores = &rsem;
+    pi.swapchainCount = 1;
+    pi.pSwapchains = &sw;
+    pi.pImageIndices = &t->vk_img_idx;
+    present(c->vk_queue, &pi);
+    t->vk_acquire_sem = 0;
+    t->surface.reset();
+    return 0;
+}
+
 kx_ctx* kx_ctx_create_graphite_dawn() { return nullptr; }
 kx_ctx* kx_ctx_create_graphite_dawn_d3d12() { return nullptr; }
 kx_ctx* kx_ctx_create_graphite_dawn_vulkan() { return nullptr; }
@@ -588,6 +932,11 @@ void kx_ctx_free(kx_ctx* c) {
         if (destroyDev) destroyDev(c->vk_dev, nullptr);
     }
     if (c->vk_inst != VK_NULL_HANDLE && g_gipa) {
+        if (c->vk_surface != VK_NULL_HANDLE) {
+            auto destroySurf =
+                (PFN_vkDestroySurfaceKHR)g_gipa(c->vk_inst, "vkDestroySurfaceKHR");
+            if (destroySurf) destroySurf(c->vk_inst, c->vk_surface, nullptr);
+        }
         auto destroyInst =
             (PFN_vkDestroyInstance)g_gipa(c->vk_inst, "vkDestroyInstance");
         if (destroyInst) destroyInst(c->vk_inst, nullptr);
@@ -660,7 +1009,11 @@ kx_target* kx_target_canvas(kx_ctx*, const char*, int, int) { return nullptr; }
 kx_target* kx_target_onscreen_dawn(kx_ctx*, void*, int, int) { return nullptr; }
 kx_target* kx_target_onscreen_metal(kx_ctx*, void*, int, int, double) { return nullptr; }
 
-void kx_target_free(kx_target* t) { delete t; }
+void kx_target_free(kx_target* t) {
+    if (t && (!t->vk_imgs.empty() || t->vk_swapchain))
+        vk_target_teardown(t->ctx, t);
+    delete t;
+}
 void kx_target_size(const kx_target* t, int* w, int* h) {
     if (w) *w = t->w;
     if (h) *h = t->h;
@@ -692,11 +1045,16 @@ int kx_flush_target(kx_ctx* c, kx_target* t) {
 // Acquisition paresseuse de la surface : no-op — toutes nos cibles posent
 // leur SkSurface à la création (pas de swapchain à interroger par frame).
 int kx_acquire_surface(kx_target* t) {
+    if (t && !t->vk_imgs.empty()) return kx_vk_acquire(t);
     return (t && t->surface) ? 0 : -1;
 }
 
-// Présentation : flush seulement — SDL_GL_SwapWindow présente après (hôte).
-int kx_present(kx_ctx* c, kx_target* t) { return kx_flush_target(c, t); }
+// Présentation : vulkan = acquire/submit/present dans kx_vk_present ;
+// GL = flush seulement — SDL_GL_SwapWindow présente après (hôte).
+int kx_present(kx_ctx* c, kx_target* t) {
+    if (t && !t->vk_imgs.empty()) return kx_vk_present(c, t);
+    return kx_flush_target(c, t);
+}
 
 // ---- image corpus déterministe (damier 64×64) ------------------------------
 sk_sp<SkImage> kx_ctx_corpus_image(kx_ctx* c) {

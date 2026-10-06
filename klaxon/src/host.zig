@@ -12,7 +12,7 @@ extern fn emscripten_get_now() f64; // ms depuis load (monotone)
 
 /// Chemin de présentation : GL = SDL_GL_SwapWindow ; dawn = le shim présente
 /// la swapchain dans kx_present (DXGI/Metal/etc). canvas wasm = gl==null.
-pub const GpuMode = enum { gl, dawn, metal };
+pub const GpuMode = enum { gl, dawn, metal, vulkan };
 pub const DawnVariant = enum { d3d12, vulkan };
 
 pub const Event = union(enum) {
@@ -174,6 +174,64 @@ pub const Host = struct {
             if (host.dp <= 0) host.dp = 1;
         }
         return host;
+    }
+
+    /// Android : graphite-vulkan primaire (ADR-0002 — Graphite partout,
+    /// Ganesh/raster en fallback seulement). La fenêtre VULKAN ne se
+    /// convertit pas en GL : en cas d'échec à n'importe quel stade on la
+    /// détruit et on repart sur le chemin GL éprouvé (acceptable au boot).
+    /// Le `driver` du JSON reflète le backend réellement choisi.
+    pub fn initAndroidWindow(io: std.Io, title: [*c]const u8, w: c_int, h: c_int) !Host {
+        if (comptime !is_android) return error.Unsupported;
+        const t0 = nowUs(io);
+        if (!sdl.SDL_Init(sdl.SDL_INIT_VIDEO)) return error.SdlInit;
+        vk: {
+            // LoadLibrary échoue tôt si le driver Vulkan est absent — SDL
+            // vérifie aussi VK_KHR_surface/android_surface disponibles.
+            if (!sdl.SDL_Vulkan_LoadLibrary(null)) {
+                sdl.SDL_Log("kx-vk: SDL_Vulkan_LoadLibrary a échoué (driver/exts absents)");
+                break :vk;
+            }
+            const flags: u64 = sdl.SDL_WINDOW_VULKAN | sdl.SDL_WINDOW_RESIZABLE |
+                sdl.SDL_WINDOW_HIGH_PIXEL_DENSITY | sdl.SDL_WINDOW_FULLSCREEN;
+            const win = sdl.SDL_CreateWindow(title, w, h, flags) orelse {
+                sdl.SDL_Log("kx-vk: SDL_CreateWindow vulkan a échoué");
+                break :vk;
+            };
+            const ctx = kx.kx_ctx_create_graphite_vulkan() orelse {
+                sdl.SDL_Log("kx-vk: kx_ctx_create_graphite_vulkan null");
+                sdl.SDL_DestroyWindow(win);
+                break :vk;
+            };
+            var surface: ?*anyopaque = null;
+            const inst = kx.kx_ctx_vk_instance(ctx);
+            if (inst == null or
+                !sdl.SDL_Vulkan_CreateSurface(win, inst, null, &surface)) {
+                sdl.SDL_Log("kx-vk: SDL_Vulkan_CreateSurface a échoué");
+                kx.kx_ctx_free(ctx);
+                sdl.SDL_DestroyWindow(win);
+                break :vk;
+            }
+            var pw: c_int = 0;
+            var ph: c_int = 0;
+            _ = sdl.SDL_GetWindowSizeInPixels(win, &pw, &ph);
+            const tgt = kx.kx_target_onscreen_vulkan(ctx, surface, pw, ph) orelse {
+                sdl.SDL_Log("kx-vk: kx_target_onscreen_vulkan null");
+                kx.kx_ctx_free(ctx);
+                sdl.SDL_DestroyWindow(win);
+                break :vk;
+            };
+            var host: Host = .{
+                .win = win, .gl = null, .mode = .vulkan, .ctx = ctx,
+                .fonts = kx.kx_fonts_global(), .target = tgt, .io = io,
+                .boot_t0_us = t0,
+            };
+            host.dp = @floatCast(sdl.SDL_GetWindowDisplayScale(win));
+            if (host.dp <= 0) host.dp = 1;
+            return host;
+        }
+        // Fallback automatique : recréation d'une fenêtre GL propre.
+        return initGlWindow(io, title, w, h);
     }
 
     /// Variante Apple : SDL_WINDOW_METAL + SDL_Metal_CreateView → CAMetalLayer
@@ -363,6 +421,11 @@ pub const Host = struct {
                     if (is_wasm) break :blk kx.kx_target_canvas(self.ctx, "#canvas", r.w, r.h);
                     if (comptime builtin.os.tag == .windows) {
                         if (self.mode == .dawn) break :blk kx.kx_target_onscreen_dawn(self.ctx, self.hwnd, r.w, r.h);
+                    }
+                    if (comptime is_android) {
+                        // null → le ctx réutilise sa VkSurfaceKHR ; seule la
+                        // swapchain est recréée à la nouvelle taille.
+                        if (self.mode == .vulkan) break :blk kx.kx_target_onscreen_vulkan(self.ctx, null, r.w, r.h);
                     }
                     break :blk kx.kx_target_onscreen_gl(self.ctx, r.w, r.h);
                 };

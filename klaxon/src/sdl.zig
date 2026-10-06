@@ -161,6 +161,7 @@ pub const SDL_Event = extern union {
 };
 
 pub extern fn SDL_Init(flags: u32) bool;
+pub extern fn SDL_Log(fmt: [*:0]const u8, ...) void;
 pub extern fn SDL_Quit() void;
 pub extern fn SDL_SetAppMetadata(name: [*c]const u8, version: [*c]const u8, ident: [*c]const u8) bool;
 pub extern fn SDL_CreateWindow(title: [*c]const u8, w: c_int, h: c_int, flags: u64) ?*Window;
@@ -196,6 +197,10 @@ pub extern fn SDL_GL_MakeCurrent(w: ?*Window, ctx: ?*GLContext) bool;
 pub extern fn SDL_GL_SetSwapInterval(interval: c_int) bool;
 pub extern fn SDL_GL_SwapWindow(w: ?*Window) bool;
 pub extern fn SDL_GL_GetProcAddress(proc: [*c]const u8) ?*anyopaque;
+
+// vulkan (Android : fenêtre SDL_WINDOW_VULKAN, surface via SDL)
+pub extern fn SDL_Vulkan_LoadLibrary(path: ?[*:0]const u8) bool;
+pub extern fn SDL_Vulkan_CreateSurface(w: ?*Window, instance: ?*anyopaque, allocator: ?*const anyopaque, surface: ?*?*anyopaque) bool;
 
 // text input / IME
 pub const SDL_Rect = extern struct { x: c_int, y: c_int, w: c_int, h: c_int };
