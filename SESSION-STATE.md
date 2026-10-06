@@ -648,3 +648,6 @@ BUILD-PROFILE.md) mesurée par device.sh.
 - Repo : default=main (flippé user), devin/baseline-import + devin/work supprimées, une seule branche.
 - v1.4 (à venir) : emitStats() périodique (240 ticks) + à la sortie — app qui ne quitte jamais sur retail produisait zéro stats → tout BLOCKED. device.sh : fallback logcat (`logcat -c` avant lancement, grep '"tool":"') quand le fichier externe est vide. Compile Linux + cross arm64 OK.
 - Findings UX retail (user) : forte latence au tap, restart après pause difficile, autoplay opaque. Hypothèses : thread moteur bloque le main, resume échoue silencieusement — à trancher avec stats live v1.4/logcat.
+- device.sh v2 : install non masquée + échec explicite (popup MIUI « Installer via USB » = vieille APK qui tourne → BLOCKED), poll accumule dernière émission jusqu'à frames≥390 ou process mort.
+- PREMIERS CHIFFRES HARDWARE (user, Xiaomi 23127PN0CG, Adreno 750 ganesh-gles) : ttff 42,2 ms (cible <200 explosée ×5), avg 12-15 ms, p99 17-19 ms, RSS ~200 Mo, audio confirmé (fed/state:playing). pacing_p99 344-2914 = bruit idle-throttle, à exclure des gaps d'idle.
+- Findings UX confirmés : clics buggés sur retail, audio OK.
