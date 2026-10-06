@@ -46,6 +46,7 @@ pub const Stats = struct {
     minimized_iters: i64 = 0,
     idle_iters: i64 = 0,
     first_frame_ms: f64 = -1,
+    ttff_ms: f64 = -1,            // boot→1er présent (time-to-first-frame, cible 200)
     sum_frame_ms: f64 = 0,
     frame_ms_ring: [2048]f32 = undefined, // p99 sur les 2048 premières frames
     interval_ms_ring: [2048]f32 = undefined, // pacing : présent→présent
@@ -110,8 +111,17 @@ pub const Host = struct {
     stats: Stats = .{},
     dirty: bool = true,
     ios_mapped_us: i128 = -1, // instant où la view UIKit est attachée à sa fenêtre
+    boot_t0_us: i96 = -1,     // marque boot la plus ancienne (init* ou markBoot)
+
+    /// Recule la marque boot (entrée du process/main) — ttff_ms la prend
+    /// en compte au premier présent. Les init* la posent déjà ; markBoot
+    /// permet à l'app de couvrir aussi son propre démarrage.
+    pub fn markBoot(self: *Host, t0_us: i96) void {
+        if (self.boot_t0_us < 0 or t0_us < self.boot_t0_us) self.boot_t0_us = t0_us;
+    }
 
     pub fn initGlWindow(io: std.Io, title: [*c]const u8, w: c_int, h: c_int) !Host {
+        const t0 = nowUs(io); // marque ttff la plus ancienne côté framework
         if (!sdl.SDL_Init(sdl.SDL_INIT_VIDEO)) return error.SdlInit;
         if (comptime is_android) {
             // Android : ES3 + stencil (clips Skia) + fullscreen implicite.
@@ -142,6 +152,7 @@ pub const Host = struct {
         return .{
             .win = win, .gl = gl, .hwnd = hwnd, .ctx = ctx,
             .fonts = kx.kx_fonts_global(), .target = tgt, .io = io,
+            .boot_t0_us = t0,
         };
     }
 
@@ -150,6 +161,7 @@ pub const Host = struct {
     /// présenté via kx_present (presentDrawable). Valable macOS ET iOS.
     pub fn initMetalWindow(io: std.Io, title: [*c]const u8, w: c_int, h: c_int) !Host {
         if (comptime builtin.os.tag == .macos or builtin.os.tag == .ios) {
+            const t0 = nowUs(io);
             if (!sdl.SDL_Init(sdl.SDL_INIT_VIDEO)) return error.SdlInit;
             const win = sdl.SDL_CreateWindow(title, w, h, sdl.SDL_WINDOW_METAL |
                 sdl.SDL_WINDOW_RESIZABLE | sdl.SDL_WINDOW_HIGH_PIXEL_DENSITY) orelse return error.NoWindow;
@@ -158,6 +170,7 @@ pub const Host = struct {
             var host: Host = .{
                 .win = win, .gl = null, .view = view, .mode = .metal, .ctx = ctx,
                 .fonts = kx.kx_fonts_global(), .target = null, .io = io,
+                .boot_t0_us = t0,
             };
             _ = host.makeMetalTarget() orelse return error.NoTarget;
             // Text input activé dès l'init (IME/macOS compose inline).
@@ -195,6 +208,7 @@ pub const Host = struct {
     /// (kx_target_canvas dessine dans le FBO 0 ; le browser présente à rAF).
     /// SDL donne juste les événements (pointeur, clavier→TEXT_INPUT, wheel).
     pub fn initCanvasWindow(title: [*c]const u8, w: c_int, h: c_int) !Host {
+        const t0 = nowUs(undefined); // wasm : horloge navigateur, pas d'io
         if (!sdl.SDL_Init(sdl.SDL_INIT_VIDEO)) return error.SdlInit;
         const win = sdl.SDL_CreateWindow(title, w, h, sdl.SDL_WINDOW_RESIZABLE) orelse return error.NoWindow;
         const ctx = kx.kx_ctx_create_ganesh_webgl("#canvas") orelse return error.NoKx;
@@ -202,6 +216,7 @@ pub const Host = struct {
         return .{
             .win = win, .gl = null, .ctx = ctx,
             .fonts = kx.kx_fonts_global(), .target = tgt, .io = undefined,
+            .boot_t0_us = t0,
         };
     }
 
@@ -211,6 +226,7 @@ pub const Host = struct {
     pub fn initDawnWindow(io: std.Io, title: [*c]const u8, w: c_int, h: c_int,
                           variant: DawnVariant) !Host {
         if (comptime builtin.os.tag == .windows) {
+            const t0 = nowUs(io);
             if (!sdl.SDL_Init(sdl.SDL_INIT_VIDEO)) return error.SdlInit;
             const win = sdl.SDL_CreateWindow(title, w, h, sdl.SDL_WINDOW_RESIZABLE) orelse return error.NoWindow;
             const props = sdl.SDL_GetWindowProperties(win);
@@ -226,6 +242,7 @@ pub const Host = struct {
             return .{
                 .win = win, .gl = null, .hwnd = hwnd, .mode = .dawn,
                 .ctx = ctx, .fonts = kx.kx_fonts_global(), .target = tgt, .io = io,
+                .boot_t0_us = t0,
             };
         } else {
             return error.Unsupported;
@@ -385,7 +402,12 @@ pub const Host = struct {
         if (!is_wasm and self.gl != null) _ = sdl.SDL_GL_SwapWindow(self.win);
         const now_us = nowUs(self.io);
         const dt = @as(f64, @floatFromInt(now_us - t0)) / 1000.0;
-        if (self.stats.first_frame_ms < 0) self.stats.first_frame_ms = dt;
+        if (self.stats.first_frame_ms < 0) {
+            self.stats.first_frame_ms = dt;
+            // ttff = marque boot → ce premier présent (draw+swap compris).
+            if (self.boot_t0_us >= 0)
+                self.stats.ttff_ms = @as(f64, @floatFromInt(now_us - self.boot_t0_us)) / 1000.0;
+        }
         self.stats.sum_frame_ms += dt;
         const i = self.stats.ring_i;
         if (i < self.stats.frame_ms_ring.len)

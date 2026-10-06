@@ -66,6 +66,22 @@
    "reason": "peak RSS gallery < 220 Mo — mesuré ~133 Mo ; proxy llvmpipe, budget device en V1"
   },
   {
+   "scene": "vehicoule-ttff",
+   "tool": "vehicoule-v0",
+   "metric": "ttff_ms",
+   "op": "<",
+   "value": 200,
+   "reason": "TTFF < 200 ms — cible utilisateur : boot→1er présent. llvmpipe mesure probablement au-dessus (Skia software) ; verdict hardware sur device"
+  },
+  {
+   "scene": "gallery-ttff",
+   "tool": "k2-gallery",
+   "metric": "ttff_ms",
+   "op": "<",
+   "value": 200,
+   "reason": "TTFF < 200 ms — médiane de 3 lancements (même discipline que cold) ; proxy llvmpipe, calibration device en V1"
+  },
+  {
    "scene": "vehicoule-apk-size",
    "tool": "vehicoule-v0",
    "metric": "apk_mb",

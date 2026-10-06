@@ -114,6 +114,7 @@ const G = struct {
     scan_err: ?[]const u8 = null,
     media_pend_act: std.atomic.Value(i32) = std.atomic.Value(i32).init(-1),
     media_pend_arg: std.atomic.Value(i64) = std.atomic.Value(i64).init(0),
+    boot_t0_us: i96 = -1,           // marque entrée runApp → ttff host
     media_pub_track: ?usize = null,
     media_cmds: usize = 0,
     music_dir: []const u8 = "music-test",
@@ -757,6 +758,7 @@ fn setup(font_data: []const u8) !void {
 
 fn runApp(init: std.process.Init) !void {
     g.io = init.io;
+    g.boot_t0_us = k.host.nowUs(init.io); // ttff : notre code démarre ici
     g.alloc = init.gpa;
     var args = try std.process.Args.Iterator.initAllocator(init.minimal.args, init.gpa);
     defer args.deinit();
@@ -804,6 +806,7 @@ fn runApp(init: std.process.Init) !void {
             "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", init.gpa, .limited(8 << 20));
     defer if (comptime !is_mobile) init.gpa.free(font_data);
     try setup(font_data);
+    g.host.markBoot(g.boot_t0_us);
     g.engine.subscribe(.{ .ctx = null, .cb = onMediaEvent });
 
     // scan via le plugin en thread (ne bloque pas le premier frame)
@@ -818,11 +821,11 @@ fn runApp(init: std.process.Init) !void {
 
     var sbuf: [640]u8 = undefined;
     const line = std.fmt.bufPrint(&sbuf,
-        "{{\"tool\":\"vehicoule-v0\",\"backend\":\"{s}\",\"driver\":\"{s}\",\"frames\":{},\"avg_ms\":{d:.3},\"p99_ms\":{d:.3},\"pacing_p99_ms\":{d:.3},\"first_frame_ms\":{d:.3},\"tracks\":{},\"state\":\"{s}\",\"pos\":{d:.1},\"fed\":{},\"queued\":{},\"media_cmds\":{},\"peak_rss_mb\":{d:.1}}}\n",
+        "{{\"tool\":\"vehicoule-v0\",\"backend\":\"{s}\",\"driver\":\"{s}\",\"frames\":{},\"avg_ms\":{d:.3},\"p99_ms\":{d:.3},\"pacing_p99_ms\":{d:.3},\"first_frame_ms\":{d:.3},\"ttff_ms\":{d:.3},\"tracks\":{},\"state\":\"{s}\",\"pos\":{d:.1},\"fed\":{},\"queued\":{},\"media_cmds\":{},\"peak_rss_mb\":{d:.1}}}\n",
         .{ @tagName(g.host.backend()), g.host.driverInfo(),
            g.host.stats.frames, g.host.stats.avgFrameMs(), g.host.stats.p99FrameMs(),
            g.host.stats.p99IntervalMs(),
-           g.host.stats.first_frame_ms, g.queue.len(),
+           g.host.stats.first_frame_ms, g.host.stats.ttff_ms, g.queue.len(),
            @tagName(g.engine.state), @as(f64, @floatFromInt(g.engine.positionUs())) / 1e6,
            g.engine.fed_frames, g.engine.queuedBytes(), g.media_cmds,
            @as(f64, @floatFromInt(k.Stats.peakRssKb())) / 1024.0 }) catch "";

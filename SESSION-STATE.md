@@ -605,3 +605,10 @@ BUILD-PROFILE.md) mesurée par device.sh.
 - Pièges consignés : assembleDebug sans -PBUILD_WITH_CMAKE = APK sans
   libmain ; abiFilters exige purge intermediates/cxx+.cxx.
 - Gates locales : 8 PASS + apk-size SKIPPED (évaluée par device.sh).
+
+## Lot — TTFF (time-to-first-frame) instrumenté + gates
+- `Stats.ttff_ms` : marque boot → 1er présent (draw+swap compris). `Host.boot_t0_us` posé à l'entrée de chaque init* ; `host.markBoot(t0)` recule la marque à l'entrée de runApp/runGallery (couvre le démarrage de l'app elle-même).
+- Émis dans les stats JSON des 2 apps. Gates : `vehicoule-ttff` + `gallery-ttff` < 200 ms (cible utilisateur, provisoire→calibration device). `gallery-ttff` = médiane-3 comme cold.
+- `device.sh` : `am start -W` → `launch_wait_ms`/`launch_total_ms` injectés dans le résultat (latence OS tap-icon→affiché, process spawn compris — complément du ttff in-app).
+- Mesuré llvmpipe : vehicoule 131 ms, gallery médiane 179 ms (179/181/200) — sous 200 ms même en software.
+- Vérifs : gates 10 PASS + 1 SKIPPED ; zig build-obj android x86_64+aarch64 = 0 erreur.

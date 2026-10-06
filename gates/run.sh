@@ -60,6 +60,11 @@ th = json.load(open(os.path.join(os.path.dirname(out_path), "thresholds.json")))
 cold_samples = [b.get("first_frame_ms") for b in (scroll, idle, cold3) if b]
 cold_samples.sort()
 cold_median = cold_samples[len(cold_samples) // 2] if cold_samples else None
+# ttff = médiane des mêmes 3 lancements gallery (boot→1er présent, in-app)
+ttff_samples = [b.get("ttff_ms") for b in (scroll, idle, cold3)
+                if b and b.get("ttff_ms") is not None]
+ttff_samples.sort()
+ttff_median = ttff_samples[len(ttff_samples) // 2] if ttff_samples else None
 for g in th["gates"]:
     src = g_scroll if g["tool"] == "k2-gallery" else g_veh
     if g["scene"] == "gallery-idle":
@@ -72,7 +77,12 @@ for g in th["gates"]:
         results.append({"scene": g["scene"], "status": "SKIPPED",
                         "reason": "gate APK — gates/device.sh", "artifact_sha256": veh_sha})
         continue
-    v = cold_median if g["scene"] == "gallery-cold" else src.get(m)
+    if g["scene"] == "gallery-cold":
+        v = cold_median
+    elif g["scene"] == "gallery-ttff":
+        v = ttff_median
+    else:
+        v = src.get(m)
     ok = {"<": lambda: v < g["value"], "<=": lambda: v <= g["value"],
           ">": lambda: v > g["value"], ">=": lambda: v >= g["value"],
           "==": lambda: v == g["value"]}[g["op"]]() if v is not None else False
@@ -84,7 +94,9 @@ for g in th["gates"]:
         "status": "PASS" if ok else "FAIL",
         "measurements": {m: v, "avg_frame_ms": src.get("avg_frame_ms") or src.get("avg_ms"),
                           "first_frame_ms": src.get("first_frame_ms"),
-                          **({"cold_samples_ms": cold_samples} if g["scene"] == "gallery-cold" else {})},
+                          "ttff_ms": src.get("ttff_ms"),
+                          **({"cold_samples_ms": cold_samples} if g["scene"] == "gallery-cold" else {}),
+                          **({"ttff_samples_ms": ttff_samples} if g["scene"] == "gallery-ttff" else {})},
         "reason": g["reason"],
     })
 

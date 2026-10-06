@@ -95,6 +95,7 @@ const G = struct {
     io: std.Io = undefined,
     dirty_extra: bool = true,
     deadline_ms: i64 = -1, // --secs : sortie auto pour CI
+    boot_t0_us: i96 = -1,  // marque entrée runGallery → ttff host
     inject: ?[]const u8 = null, // --inject : texte injecté via SDL_PushEvent
     a11y_at: i64 = -1,          // --a11y : dump programmatique + activate test à t=ms
     a11y_dumped: bool = false,
@@ -570,6 +571,7 @@ export fn kx_gallery_main(argc: c_int, argv: ?[*:null]?[*:0]u8) c_int {
 fn runGallery(init: std.process.Init) !void {
     if (is_wasm) return; // web : main appelé au load — JS pilote gallery_init/step
     g.io = init.io;
+    g.boot_t0_us = k.host.nowUs(init.io); // ttff : notre code démarre ici
     // args : --frames N (sortie automatique pour le bench/CI)
     // initAllocator requis sur Windows (WTF-8) ; Iterator.init y est
     // un compileError. (diff retourné par l'agent K3-Windows)
@@ -646,6 +648,7 @@ fn runGallery(init: std.process.Init) !void {
         try std.Io.Dir.cwd().readFileAlloc(g.io, "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", init.gpa, .limited(8 << 20));
     defer if (!is_wasm and builtin.os.tag != .windows and !is_ios and builtin.os.tag != .macos and !is_android) init.gpa.free(font_data); // Skia copie le blob
     try setup(font_data);
+    g.host.markBoot(g.boot_t0_us);
 
     while (g.running) tick();
 
@@ -653,11 +656,11 @@ fn runGallery(init: std.process.Init) !void {
     // pas capturé par logcat → écrit aussi dans files/k4-gallery.json.
     var sbuf: [2048]u8 = undefined;
     const line = std.fmt.bufPrint(&sbuf,
-        "{{\"tool\":\"k2-gallery\",\"backend\":\"{s}\",\"driver\":\"{s}\",\"frames\":{},\"avg_frame_ms\":{d:.3},\"p99_frame_ms\":{d:.3},\"pacing_p99_ms\":{d:.3},\"first_frame_ms\":{d:.3},\"resizes\":{},\"idle_iters\":{},\"minimized_iters\":{},\"materializations\":{},\"max_slots_used\":{},\"items\":{},\"slots_saturated\":{},\"ime_shift_px\":{d:.1},\"ime_bottom\":{},\"ime_visible\":{},\"peak_rss_mb\":{d:.1}}}\n",
+        "{{\"tool\":\"k2-gallery\",\"backend\":\"{s}\",\"driver\":\"{s}\",\"frames\":{},\"avg_frame_ms\":{d:.3},\"p99_frame_ms\":{d:.3},\"pacing_p99_ms\":{d:.3},\"first_frame_ms\":{d:.3},\"ttff_ms\":{d:.3},\"resizes\":{},\"idle_iters\":{},\"minimized_iters\":{},\"materializations\":{},\"max_slots_used\":{},\"items\":{},\"slots_saturated\":{},\"ime_shift_px\":{d:.1},\"ime_bottom\":{},\"ime_visible\":{},\"peak_rss_mb\":{d:.1}}}\n",
         .{
             @tagName(g.host.backend()), g.host.driverInfo(), g.host.stats.frames,
             g.host.stats.avgFrameMs(), g.host.stats.p99FrameMs(), g.host.stats.p99IntervalMs(),
-            g.host.stats.first_frame_ms, g.host.stats.resizes,
+            g.host.stats.first_frame_ms, g.host.stats.ttff_ms, g.host.stats.resizes,
             g.host.stats.idle_iters, g.host.stats.minimized_iters,
             g.materializations, g.max_slots_used, g.list.count, g.list.saturated,
             g.ime_shift, g.ime_bottom_last, g.ime_visible_last,

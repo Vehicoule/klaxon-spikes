@@ -51,12 +51,22 @@ run_scene() { # nom, kx_args, fichier stats → JSON ligne (ou vide)
     local name="$1" args="$2" stats="$3"
     $ADB shell "run-as $PKG rm -f $stats" 2>/dev/null
     $ADB shell am force-stop "$PKG"
-    $ADB shell am start -n "$PKG/.SDLActivity" --es kx_args "$args" >/dev/null
+    # -W : attend l'activité affichée → WaitTime ≈ tap-icon→1re frame,
+    # complément OS au ttff_ms in-app (process spawn compris).
+    local start_out wait_ms total_ms
+    start_out=$($ADB shell am start -W -n "$PKG/.SDLActivity" --es kx_args "$args" 2>&1)
+    wait_ms=$(echo "$start_out" | sed -n 's/.*WaitTime: \([0-9]*\).*/\1/p' | tail -1)
+    total_ms=$(echo "$start_out" | sed -n 's/.*TotalTime: \([0-9]*\).*/\1/p' | tail -1)
     for i in $(seq 1 60); do
         sleep 2
         local j
         j=$($ADB shell "run-as $PKG cat $stats 2>/dev/null" | tr -d '\r' | tail -1)
-        case "$j" in \{*) echo "$j"; return;; esac
+        case "$j" in \{*)
+            # injecte la latence de lancement OS dans le résultat
+            j="${j#\{}"
+            echo "{\"launch_wait_ms\":${wait_ms:-null},\"launch_total_ms\":${total_ms:-null},$j"
+            return;;
+        esac
     done
     echo ""
 }
@@ -136,7 +146,9 @@ for g in th["gates"]:
         "backend": src.get("backend", "?"), "driver": driver(src),
         "scene": g["scene"], "status": status,
         "measurements": {m: v, "avg_ms": src.get("avg_frame_ms") or src.get("avg_ms"),
-                         "rss": src.get("peak_rss_mb"), "pacing": src.get("pacing_p99_ms")},
+                         "rss": src.get("peak_rss_mb"), "pacing": src.get("pacing_p99_ms"),
+                         "ttff_ms": src.get("ttff_ms"),
+                         "launch_wait_ms": src.get("launch_wait_ms")},
         "reason": reason})
 
 fails = sum(1 for r in results if r["status"] == "FAIL")
