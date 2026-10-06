@@ -85,10 +85,13 @@ run_scene() { # nom, kx_args, fichier stats → JSON ligne (ou vide)
     # -W : attend l'activité affichée → WaitTime ≈ tap-icon→1re frame,
     # complément OS au ttff_ms in-app (process spawn compris).
     local start_out wait_ms total_ms
-    # kx_args reste groupé par les doubles quotes (le shell distant les
-    # honore). NE PAS ajouter de quotes internes : SDLActivity splitte sur
-    # " " → "'--dir"/"--autoplay'" casseraient les 1er/dernier args.
-    start_out=$($ADB shell am start -W -n "$PKG/.SDLActivity" --es kx_args "$args" 2>&1)
+    # kx_args = UNE valeur : guillemets simples internes OBLIGATOIRES sur
+    # adb qui re-tokenize via shell distant (les doubles quotes locales sont
+    # consommées avant exec → kx_args ne recevrait que "--dir" et le reste
+    # partirait en args positionnels → scène muette). Sur retail (argv
+    # verbatim) les quotes survivent dans la valeur : SDLActivity les
+    # strippe avant le split (getArguments) → les 2 transports marchent.
+    start_out=$($ADB shell am start -W -n "$PKG/.SDLActivity" --es kx_args "'$args'" 2>&1)
     wait_ms=$(echo "$start_out" | sed -n 's/.*WaitTime: \([0-9]*\).*/\1/p' | tail -1)
     total_ms=$(echo "$start_out" | sed -n 's/.*TotalTime: \([0-9]*\).*/\1/p' | tail -1)
     # stats périodiques depuis v1.4 : on accumule la dernière émission et

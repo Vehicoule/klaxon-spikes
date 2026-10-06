@@ -324,6 +324,17 @@ public class SDLActivity extends Activity implements View.OnSystemUiVisibilityCh
         // (am start -e kx_args "--secs 20 --seed 0x..").
         String extra = getIntent() != null ? getIntent().getStringExtra("kx_args") : null;
         if (extra == null || extra.isEmpty()) return new String[0];
+        // Selon le transport adb, les quotes ajoutées côté émetteur peuvent
+        // survivre dans la valeur (retail = argv verbatim → "'--dir ...'"
+        // arrive avec ses quotes ; shell re-parsé → déjà propres). On strippe
+        // toute paire de quotes englobantes AVANT le split, sinon les 1er et
+        // dernier tokens gardent un quote et sont méconnus.
+        extra = extra.trim();
+        while (extra.length() >= 2 &&
+               ((extra.charAt(0) == '\'' && extra.charAt(extra.length() - 1) == '\'') ||
+                (extra.charAt(0) == '"'  && extra.charAt(extra.length() - 1) == '"'))) {
+            extra = extra.substring(1, extra.length() - 1).trim();
+        }
         return extra.split(" ");
     }
 
