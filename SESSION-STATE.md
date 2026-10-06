@@ -641,3 +641,4 @@ BUILD-PROFILE.md) mesurée par device.sh.
 - Leçon : retail ≠ émulateur — `run-as` n'existe qu'en debuggable+userdebug ; le chemin externe privé marche partout.
 - Zig 0.17 trap de nouveau confirmé : `makeDirAbsolute` absent du std refactoré (lazy-compile l'avait masqué sur Linux, cross-compile l'a trouvé) → extern `SDL_GetAndroidExternalStoragePath` direct.
 - gallery-ttff FAIL un run sous charge (samples ~300) puis PASS à froid (~200) — variance environnement llvmpipe, pas de régression.
+- Watch item (user) : modes de build dev/test — `build_veh.sh dev` (zig Debug + cache décodeurs + skip signe/zipalign ≈10-20 s chaud) + boucle desktop-first 4,7 s ; hot reload natif (dlopen module dev) remis à plus tard.
