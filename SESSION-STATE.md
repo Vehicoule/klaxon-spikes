@@ -643,3 +643,6 @@ BUILD-PROFILE.md) mesurée par device.sh.
 - gallery-ttff FAIL un run sous charge (samples ~300) puis PASS à froid (~200) — variance environnement llvmpipe, pas de régression.
 - Watch item (user) : modes de build dev/test — `build_veh.sh dev` (zig Debug + cache décodeurs + skip signe/zipalign ≈10-20 s chaud) + boucle desktop-first 4,7 s ; hot reload natif (dlopen module dev) remis à plus tard.
 - Proposition user (à valider agent planning) : matrice modes de build dev/test/ship/bench — zig Debug vs ReleaseSmall vs ReleaseFast, cache décodeurs, sdlTrim, ARM64_ONLY, keystore dev/ship. Câblage dev+ship à la v1.3.
+- v1.3-slim livrée par enfant Android : 11,39 Mio, sha256 6eb38947…45bd, cert 0301d4a0, arm64-only ; `SDL_GetAndroidExternalStoragePath` exportée par libSDL3 allégé (nm -D confirmé) ; preuve runtime kx36 : `adb shell cat /sdcard/…/vehicoule.json` complet sans run-as.
+- Bug attrapé avant crash user : `SDL_GetAndroidExternalStoragePath` retourne un buffer STATIQUE SDL → `SDL_free` dessus = free-of-static ; retiré (d0ad171). APK v1.3 OK (impl. enfant sans free).
+- Repo : default=main (flippé user), devin/baseline-import + devin/work supprimées, une seule branche.
