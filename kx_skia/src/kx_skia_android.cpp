@@ -46,10 +46,47 @@
 #include "include/gpu/graphite/BackendSemaphore.h"
 #include "include/gpu/graphite/BackendTexture.h"
 #include <android/log.h>
+#include <sys/system_properties.h>
+#include <unistd.h>
+#include <chrono>
+#include <cstdlib>
 // fprintf(stderr) est invisible sur Android (stderr non routé logcat) —
 // les bails silencieux de l'init vulkan logguent ici, utile au diagnostic
 // sur device réel autant qu'émulateur.
 #define KXVKLOG(...) __android_log_print(ANDROID_LOG_ERROR, "kx-vk", __VA_ARGS__)
+
+// Instrumentation frame-breakdown — activée par env KX_VK_DEBUG=1, prop
+// debug.kx.vk=1 (root) ou fichier marqueur (retail non-rooté :
+// `adb shell touch /sdcard/Android/data/org.libsdl.app/files/kx_vk_debug`).
+static bool vk_dbg() {
+    static int dbg = -1;
+    if (dbg < 0) {
+        dbg = 0;
+        const char* e = std::getenv("KX_VK_DEBUG");
+        if (e && e[0] == '1') dbg = 1;
+        if (!dbg) {
+            char v[8] = {};
+            if (__system_property_get("debug.kx.vk", v) > 0 && v[0] == '1') dbg = 1;
+        }
+        if (!dbg)
+            dbg = ::access("/sdcard/Android/data/org.libsdl.app/files/kx_vk_debug",
+                           F_OK) == 0;
+    }
+    return dbg != 0;
+}
+static inline uint64_t vk_now_ns() {
+    return (uint64_t)std::chrono::steady_clock::now().time_since_epoch().count();
+}
+static void vk_dbg_flush(kx_target* t) {
+    if (t->vk_dbg_frames < 120) return;
+    const double f = (double)t->vk_dbg_frames;
+    KXVKLOG("frame-breakdown /%d frames : acquire %.1fms record %.1fms "
+            "submit %.1fms present %.1fms",
+            (int)f, t->vk_dbg_acq_ns / f / 1e6, t->vk_dbg_rec_ns / f / 1e6,
+            t->vk_dbg_sub_ns / f / 1e6, t->vk_dbg_pres_ns / f / 1e6);
+    t->vk_dbg_frames = 0;
+    t->vk_dbg_acq_ns = t->vk_dbg_rec_ns = t->vk_dbg_sub_ns = t->vk_dbg_pres_ns = 0;
+}
 #include "include/gpu/graphite/Context.h"
 #include "include/gpu/graphite/ContextOptions.h"
 #include "include/gpu/graphite/GraphiteTypes.h"
@@ -700,15 +737,13 @@ bool vk_target_swapchain(kx_ctx* c, kx_target* t, int w, int h) {
     if (caps.maxImageCount && imageCount > caps.maxImageCount)
         imageCount = caps.maxImageCount;
 
+    // Usage minimal : COLOR_ATTACHMENT + INPUT_ATTACHMENT (requis par
+    // VulkanCaps::getTextureUsage pour voir la texture renderable).
+    // TRANSFER_SRC/DST et SAMPLED volontairement exclus — sur Adreno les
+    // usages de transfert neutralisent UBWC (compression framebuffer) et
+    // la cible swapchain n'a pas besoin d'être copiée ni échantillonnée.
     VkImageUsageFlags usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
-                              VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
-                              VK_IMAGE_USAGE_TRANSFER_DST_BIT;
-    // INPUT_ATTACHMENT est obligatoire : VulkanCaps::getTextureUsage n'y
-    // voit une texture renderable qu'avec COLOR_ATTACHMENT+INPUT_ATTACHMENT.
-    if (caps.supportedUsageFlags & VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT)
-        usage |= VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT;
-    if (caps.supportedUsageFlags & VK_IMAGE_USAGE_SAMPLED_BIT)
-        usage |= VK_IMAGE_USAGE_SAMPLED_BIT;
+                              VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT;
 
     VkCompositeAlphaFlagBitsKHR composite =
         (caps.supportedCompositeAlpha & VK_COMPOSITE_ALPHA_INHERIT_BIT_KHR)
@@ -739,6 +774,10 @@ bool vk_target_swapchain(kx_ctx* c, kx_target* t, int w, int h) {
     getImgs(c->vk_dev, (VkSwapchainKHR)t->vk_swapchain, &n, nullptr);
     std::vector<VkImage> imgs(n);
     getImgs(c->vk_dev, (VkSwapchainKHR)t->vk_swapchain, &n, imgs.data());
+    KXVKLOG("swapchain %ux%u fmt=%d imgs=%u min=%u max=%u usage=0x%x "
+            "composite=0x%x preTransform=0x%x",
+            extent.width, extent.height, (int)format, n, caps.minImageCount,
+            caps.maxImageCount, usage, composite, caps.currentTransform);
     for (uint32_t i = 0; i < n; ++i) {
         VkSemaphoreCreateInfo si = {VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
                                     nullptr, 0};
@@ -824,14 +863,20 @@ int kx_vk_acquire(kx_target* t) {
     VkSemaphoreCreateInfo si = {VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
                                 nullptr, 0};
     if (createSem(c->vk_dev, &si, nullptr, &sem) != VK_SUCCESS) return -1;
+    const uint64_t t0 = vk_now_ns();
     VkResult r = acquire(c->vk_dev, (VkSwapchainKHR)t->vk_swapchain,
                          UINT64_MAX, sem, VK_NULL_HANDLE, &t->vk_img_idx);
+    const uint64_t t1 = vk_now_ns();
     if (r != VK_SUCCESS && r != VK_SUBOPTIMAL_KHR) {
         // OUT_OF_DATE / SURFACE_LOST : l'hôte recrée la cible au prochain
         // resize — le frame de transition saute simplement.
         auto destroySem = (PFN_vkDestroySemaphore)vk_dproc(c->vk_dev, "vkDestroySemaphore");
         if (destroySem) destroySem(c->vk_dev, sem, nullptr);
         return -1;
+    }
+    if (vk_dbg()) {
+        t->vk_dbg_acq_ns += t1 - t0;
+        t->vk_dbg_acq_end = t1;
     }
     t->vk_acquire_sem = (uint64_t)sem;
     t->surface = t->vk_imgs[t->vk_img_idx].surf;
@@ -842,13 +887,29 @@ int kx_vk_acquire(kx_target* t) {
 // transition finale → PRESENT_SRC_KHR) + submit async + queuePresent.
 int kx_vk_present(kx_ctx* c, kx_target* t) {
     if (!t->surface || !t->vk_acquire_sem) return -1;
+    const uint64_t t0 = vk_now_ns();
+    if (vk_dbg() && t->vk_dbg_acq_end)
+        t->vk_dbg_rec_ns += t0 - t->vk_dbg_acq_end;
     auto rec = c->recorder->snap();
     auto destroySem = (PFN_vkDestroySemaphore)vk_dproc(c->vk_dev, "vkDestroySemaphore");
     if (!rec) {
-        // rien d'enregistré : libérer le semaphore d'acquire (pas de
-        // finishedProc pour le consommer).
+        // Rien d'enregistré. L'image acquise DOIT être présentée quand
+        // même : une image acquise jamais présentée reste possédée par
+        // l'app et sort de la rotation — quelques frames vides affament
+        // la swapchain puis acquire bloque (famine → stalls).
         if (destroySem) destroySem(c->vk_dev, (VkSemaphore)t->vk_acquire_sem, nullptr);
         t->vk_acquire_sem = 0;
+        auto present0 = (PFN_vkQueuePresentKHR)vk_dproc(c->vk_dev, "vkQueuePresentKHR");
+        if (present0) {
+            VkSwapchainKHR sw = (VkSwapchainKHR)t->vk_swapchain;
+            VkPresentInfoKHR pi = {};
+            pi.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+            pi.waitSemaphoreCount = 0; // rien n'a touché l'image
+            pi.swapchainCount = 1;
+            pi.pSwapchains = &sw;
+            pi.pImageIndices = &t->vk_img_idx;
+            present0(c->vk_queue, &pi);
+        }
         t->surface.reset();
         return 0;
     }
@@ -882,8 +943,10 @@ int kx_vk_present(kx_ctx* c, kx_target* t) {
         if (f->pfn) f->pfn(f->dev, f->sem, nullptr);
         delete f;
     };
+    const uint64_t t1 = vk_now_ns();
     c->gctx->insertRecording(info);
     c->gctx->submit(skgpu::graphite::SyncToCpu::kNo);
+    const uint64_t t2 = vk_now_ns();
 
     VkSemaphore rsem = (VkSemaphore)t->vk_imgs[t->vk_img_idx].render_sem;
     VkSwapchainKHR sw = (VkSwapchainKHR)t->vk_swapchain;
@@ -895,6 +958,13 @@ int kx_vk_present(kx_ctx* c, kx_target* t) {
     pi.pSwapchains = &sw;
     pi.pImageIndices = &t->vk_img_idx;
     present(c->vk_queue, &pi);
+    const uint64_t t3 = vk_now_ns();
+    if (vk_dbg()) {
+        t->vk_dbg_sub_ns += t2 - t1;
+        t->vk_dbg_pres_ns += t3 - t2;
+        t->vk_dbg_frames++;
+        vk_dbg_flush(t);
+    }
     t->vk_acquire_sem = 0;
     t->surface.reset();
     return 0;

@@ -123,6 +123,7 @@ const G = struct {
     music_dir: []const u8 = "music-test",
     plugin_path_arg: ?[]const u8 = null, // --plugin explicite ; sinon résolu vs exe
     autoplay: bool = false,
+    autoplay_logged: bool = false,
     // lecture
     engine: audio.Engine = .{},
     selected: ?usize = null,
@@ -568,13 +569,23 @@ fn tick() void {
     }
 
     // scan terminé → remplir la liste
-    if (g.scan_done.load(.acquire) and g.queue.len() > 0 and g.list.count == 0) {
-        g.list.count = g.queue.len();
-        g.list.initNode();
-        g.list.invalidate();
-        g.dirty_extra = true;
-        g.sem_dirty = true;
-        if (g.autoplay) playIndex(0);
+    if (g.scan_done.load(.acquire) and g.list.count == 0) {
+        if (g.queue.len() > 0) {
+            g.list.count = g.queue.len();
+            g.list.initNode();
+            g.list.invalidate();
+            g.dirty_extra = true;
+            g.sem_dirty = true;
+            if (g.autoplay) playIndex(0);
+        } else if (g.autoplay and !g.autoplay_logged) {
+            // scan terminé sans piste : autoplay silencieux sinon invisible
+            // sur device (ex. dir vide, fixtures absentes, mauvais path).
+            g.autoplay_logged = true;
+            sdl.SDL_Log("kx: autoplay skipped, queue empty (dir=%.*s)",
+                @as(c_int, @intCast(g.music_dir.len)), g.music_dir.ptr);
+            if (g.scan_err) |e|
+                sdl.SDL_Log("kx: scan_err=%.*s", @as(c_int, @intCast(e.len)), e.ptr);
+        }
     }
 
     // MediaSession OS : commandes lockscreen/notif drainées sur thread SDL

@@ -47,6 +47,14 @@ struct kx_target {
     std::vector<kx_vkimg> vk_imgs;
     uint32_t vk_img_idx = 0;
     uint64_t vk_acquire_sem = 0; // VkSemaphore signalé par l'Acquire courant
+    // instrumentation frame-breakdown (KX_VK_DEBUG / debug.kx.vk / fichier
+    // marqueur) : temps CPU en ns par phase, log toutes les 120 frames.
+    uint64_t vk_dbg_frames = 0;
+    uint64_t vk_dbg_acq_ns = 0;   // vkAcquireNextImageKHR (blocage vsync+GPU)
+    uint64_t vk_dbg_rec_ns = 0;   // acquire→present = dessin zig + record skia
+    uint64_t vk_dbg_sub_ns = 0;   // insertRecording + submit
+    uint64_t vk_dbg_pres_ns = 0;  // vkQueuePresentKHR
+    uint64_t vk_dbg_acq_end = 0;  // timestamp fin d'acquire (origine record)
 };
 
 // Internes implémentés dans kx_skia_linux.cpp.
