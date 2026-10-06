@@ -635,3 +635,9 @@ BUILD-PROFILE.md) mesurée par device.sh.
 - Gate APK : v1.2 passe la gate provisoire <25 ET la vraie gate v13 <12.
 - Levier suivant si North Star <8 : libmain.so (Skia .a + décodeurs) — LTO/ICU-trim.
 - Branches : devin/work fusionné dans main + supprimée ; baseline-import reste default (flip manuel user requis pour suppression).
+
+## 2026-10-06 — Fix stats retail (run-as refusé) : stats → dossier externe privé
+- Diagnostic run device user (Xiaomi 23127PN0CG, sdk36 retail) : `run-as` refusé → tout BLOCKED. Fix : stats JSON écrits via `SDL_GetAndroidExternalStoragePath()` → `/sdcard/Android/data/<pkg>/files/` (lisible adb shell sans run-as, zéro permission). device.sh lit ce chemin.
+- Leçon : retail ≠ émulateur — `run-as` n'existe qu'en debuggable+userdebug ; le chemin externe privé marche partout.
+- Zig 0.17 trap de nouveau confirmé : `makeDirAbsolute` absent du std refactoré (lazy-compile l'avait masqué sur Linux, cross-compile l'a trouvé) → extern `SDL_GetAndroidExternalStoragePath` direct.
+- gallery-ttff FAIL un run sous charge (samples ~300) puis PASS à froid (~200) — variance environnement llvmpipe, pas de régression.

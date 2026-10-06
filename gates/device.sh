@@ -69,8 +69,11 @@ if [ "$FIXTURES" != "none" ] && [ -d "$FIXTURES" ]; then
 fi
 
 run_scene() { # nom, kx_args, fichier stats → JSON ligne (ou vide)
+    # stats écrits dans le dossier externe privé (sdcard) depuis v1.3 —
+    # lisible via adb shell sur retail, sans run-as.
     local name="$1" args="$2" stats="$3"
-    $ADB shell "run-as $PKG rm -f $stats" 2>/dev/null
+    local sp="/sdcard/Android/data/$PKG/files/$stats"
+    $ADB shell rm -f "$sp" 2>/dev/null
     $ADB shell am force-stop "$PKG"
     # -W : attend l'activité affichée → WaitTime ≈ tap-icon→1re frame,
     # complément OS au ttff_ms in-app (process spawn compris).
@@ -81,7 +84,7 @@ run_scene() { # nom, kx_args, fichier stats → JSON ligne (ou vide)
     for i in $(seq 1 60); do
         sleep 2
         local j
-        j=$($ADB shell "run-as $PKG cat $stats 2>/dev/null" | tr -d '\r' | tail -1)
+        j=$($ADB shell "cat $sp 2>/dev/null" | tr -d '\r' | tail -1)
         case "$j" in \{*)
             # injecte la latence de lancement OS dans le résultat
             j="${j#\{}"
@@ -95,11 +98,11 @@ run_scene() { # nom, kx_args, fichier stats → JSON ligne (ou vide)
 apk_sha=$(sha256sum "$APK" | cut -c1-16)
 veh_json=$(run_scene vehicoule \
     "--dir /data/data/$PKG/files/music --frames 400 --secs 30 --autoplay" \
-    files/vehicoule.json)
+    vehicoule.json)
 gal_json=""
 if [ -n "$GAL_APK" ] && [ -f "$GAL_APK" ]; then
     $ADB install -r "$GAL_APK" >/dev/null
-    gal_json=$(run_scene gallery "--frames 400 --wheel 100 --secs 45" files/k4-gallery.json)
+    gal_json=$(run_scene gallery "--frames 400 --wheel 100 --secs 45" k4-gallery.json)
 fi
 
 OUT="$OUT" VEH="$veh_json" GAL="$gal_json" SHA="$apk_sha" \

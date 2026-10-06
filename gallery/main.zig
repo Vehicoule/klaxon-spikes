@@ -489,6 +489,8 @@ extern fn kx_ime_bottom() c_int;
 extern fn kx_ime_visible() c_int;
 extern fn kx_view_bottom() c_int;
 extern fn fopen(path: [*:0]const u8, mode: [*:0]const u8) ?*anyopaque;
+extern fn SDL_GetAndroidExternalStoragePath() callconv(.c) ?[*:0]u8;
+extern fn SDL_free(ptr: ?*anyopaque) callconv(.c) void;
 extern fn fwrite(ptr: [*]const u8, size: usize, n: usize, f: ?*anyopaque) usize;
 extern fn fclose(f: ?*anyopaque) c_int;
 
@@ -680,9 +682,19 @@ fn runGallery(init: std.process.Init) !void {
     ) catch "";
     std.debug.print("{s}", .{line});
     if (comptime is_android) {
-        if (fopen("/data/data/org.libsdl.app/files/k4-gallery.json", "w")) |f| {
-            _ = fwrite(line.ptr, 1, line.len, f);
-            _ = fclose(f);
+        // externe privé : adb shell lit sans run-as (retail).
+        var pbuf2: [1024]u8 = undefined;
+        const gpath: [:0]const u8 = blk: {
+            const ext = SDL_GetAndroidExternalStoragePath() orelse break :blk "/data/data/org.libsdl.app/files";
+            defer SDL_free(ext);
+            break :blk std.fmt.bufPrintSentinel(&pbuf2,
+                "{s}/k4-gallery.json", .{std.mem.span(ext)}, 0) catch "";
+        };
+        if (gpath.len > 0) {
+            if (fopen(gpath.ptr, "w")) |f| {
+                _ = fwrite(line.ptr, 1, line.len, f);
+                _ = fclose(f);
+            }
         }
     }
     g.host.deinit();

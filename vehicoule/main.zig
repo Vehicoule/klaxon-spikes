@@ -37,6 +37,7 @@ extern fn fwrite(ptr: [*]const u8, size: usize, n: usize, f: ?*anyopaque) usize;
 extern fn fclose(f: ?*anyopaque) c_int;
 extern fn SDL_GetBasePath() callconv(.c) ?[*:0]u8;
 extern fn SDL_GetPrefPath(org: [*:0]const u8, app: [*:0]const u8) callconv(.c) ?[*:0]u8;
+extern fn SDL_GetAndroidExternalStoragePath() callconv(.c) ?[*:0]u8;
 extern fn SDL_free(ptr: ?*anyopaque) callconv(.c) void;
 
 // actions figées côté glue : 0 play,1 pause,2 next,3 prev,4 seek(µs),5 stop.
@@ -858,9 +859,14 @@ fn runApp(init: std.process.Init) !void {
     std.debug.print("{s}", .{line});
     if (comptime is_mobile) { // stderr invisible → stats via fichier sandbox
         var pbuf: [1024]u8 = undefined;
-        const stats_path: [:0]const u8 = if (comptime is_android)
-            "/data/data/org.libsdl.app/files/vehicoule.json"
-        else blk: {
+        const stats_path: [:0]const u8 = if (comptime is_android) blk: {
+            // dossier externe privé de l'app : pas de permission, lisible
+            // par adb shell sur retail (run-as refuse hors userdebug).
+            const ext = SDL_GetAndroidExternalStoragePath() orelse break :blk "";
+            defer SDL_free(ext);
+            break :blk std.fmt.bufPrintSentinel(&pbuf,
+                "{s}/vehicoule.json", .{std.mem.span(ext)}, 0) catch "";
+        } else blk: {
             const home: [*:0]const u8 = std.c.getenv("HOME") orelse break :blk "";
             break :blk std.fmt.bufPrintSentinel(&pbuf,
                 "{s}/Documents/vehicoule.json", .{std.mem.span(home)}, 0) catch "";
