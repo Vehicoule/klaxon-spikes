@@ -77,6 +77,19 @@ x86_64 exécuté : install signé, autoplay `fed:208896`, media_cmds:2.
 Projection honnête arm64 stripped + ReleaseSmall : libmain ~5-7 Mo,
 APK ~**9-11 Mo** (SDL3 compris, avant compression Play).
 
+## 2ter. Audit réel de l'APK v1.1 — mesuré (28,6 Mo, dual-ABI)
+
+| Bloc | Compressé | Détail |
+|---|---|---|
+| `lib/` | **24,0 Mo (84 %)** | libmain.so arm64 8,59 + x86_64 8,75 + libSDL3.so ×2 = 6,66 |
+| `assets/` | **4,4 Mo** | fixtures : 3 WAV 8 s × 1,41 Mo = 4,23 → tronqués à 2 s = 1,06 (fait) |
+| reste (dex/res/manifest) | ~0,2 Mo | classes2.dex 0,11 |
+
+Lecture : le poids = les 2 ABI. Chemin vers la gate <12 Mo :
+**arm64-only** (−12,3 Mo) + fixtures 2 s (−3,2 Mo) ≈ **12,2 Mo**, puis
+SDL3 allégé ou ICU-trim pour passer sous la barre. La v1.1 fixtures-2s
+projetée dual-ABI ≈ 25,5 Mo ; l'arm64-only ≈ **12,3 Mo**.
+
 ## 3. Leviers rangés par gain/effort (ordre d'attaque)
 
 1. **ReleaseSmall** — zig obj 6,7→1,2 Mo, déjà applicable.
