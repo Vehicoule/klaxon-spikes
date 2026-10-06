@@ -75,6 +75,12 @@ pub const SDL_EVENT_MOUSE_WHEEL: u32 = 0x403;
 pub const SDL_EVENT_FINGER_DOWN: u32 = 0x700;
 pub const SDL_EVENT_FINGER_UP: u32 = 0x701;
 pub const SDL_EVENT_FINGER_MOTION: u32 = 0x702;
+pub const SDL_EVENT_FINGER_CANCELED: u32 = 0x703;
+
+// hint : off → plus de synthèse tactile→souris (les FINGER_* restent
+// livrés ; on les traduit nous-mêmes — certains drivers/OEM perdent le
+// BUTTON_UP synthétisé, cause de "clics morts" mesurée sur retail).
+pub const SDL_HINT_TOUCH_MOUSE_EVENTS = "SDL_TOUCH_MOUSE_EVENTS";
 
 // SDL_Event union (SDL3) — tête commune + window event payload.
 // Suffisant pour les events qu'on lit ; le C side garde la taille réelle (128o).
@@ -157,11 +163,26 @@ pub const SDL_Event = extern union {
         integer_x: i32,
         integer_y: i32,
     },
+    // SDL_TouchFingerEvent : x/y/dx/dy/pressure NORMALISÉS 0..1 (×win px).
+    tfinger: extern struct {
+        type: u32,
+        reserved: u32,
+        timestamp: u64,
+        touchID: u64,
+        fingerID: u64,
+        x: f32,
+        y: f32,
+        dx: f32,
+        dy: f32,
+        pressure: f32,
+        windowID: u32,
+    },
     padding: [128]u8,
 };
 
 pub extern fn SDL_Init(flags: u32) bool;
 pub extern fn SDL_Log(fmt: [*:0]const u8, ...) void;
+pub extern fn SDL_SetHint(name: [*:0]const u8, value: [*:0]const u8) bool;
 pub extern fn SDL_Quit() void;
 pub extern fn SDL_SetAppMetadata(name: [*c]const u8, version: [*c]const u8, ident: [*c]const u8) bool;
 pub extern fn SDL_CreateWindow(title: [*c]const u8, w: c_int, h: c_int, flags: u64) ?*Window;

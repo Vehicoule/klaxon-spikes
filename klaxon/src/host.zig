@@ -132,6 +132,10 @@ pub const Host = struct {
 
     pub fn initGlWindow(io: std.Io, title: [*c]const u8, w: c_int, h: c_int) !Host {
         const t0 = nowUs(io); // marque ttff la plus ancienne côté framework
+        if (comptime is_android)
+            // tactile traduit par nous (FINGER_*) — la synthèse souris de
+            // SDL peut perdre le BUTTON_UP sur retail (clics morts mesurés).
+            _ = sdl.SDL_SetHint(sdl.SDL_HINT_TOUCH_MOUSE_EVENTS, "0");
         if (!sdl.SDL_Init(sdl.SDL_INIT_VIDEO)) return error.SdlInit;
         if (comptime is_android) {
             // Android : ES3 + stencil (clips Skia) + fullscreen implicite.
@@ -184,6 +188,7 @@ pub const Host = struct {
     pub fn initAndroidWindow(io: std.Io, title: [*c]const u8, w: c_int, h: c_int) !Host {
         if (comptime !is_android) return error.Unsupported;
         const t0 = nowUs(io);
+        _ = sdl.SDL_SetHint(sdl.SDL_HINT_TOUCH_MOUSE_EVENTS, "0"); // idem GL
         if (!sdl.SDL_Init(sdl.SDL_INIT_VIDEO)) return error.SdlInit;
         vk: {
             // LoadLibrary échoue tôt si le driver Vulkan est absent — SDL
@@ -445,7 +450,7 @@ pub const Host = struct {
     pub fn pollEvents(self: *Host, on_event: ?*const fn (Event) void) bool {
         var ev: sdl.SDL_Event = undefined;
         while (sdl.SDL_PollEvent(&ev)) {
-            const e = translate(ev, self.winToUi()) orelse continue;
+            const e = self.translate(ev) orelse continue;
             if (on_event) |f| f(e);
             if (!self.handleEvent(e)) return false;
         }
@@ -471,7 +476,7 @@ pub const Host = struct {
             self.stats.idle_iters += 1;
             var ev: sdl.SDL_Event = undefined;
             if (sdl.SDL_WaitEventTimeout(&ev, wait_ms)) {
-                if (translate(ev, self.winToUi())) |e| {
+                if (self.translate(ev)) |e| {
                     if (on_event) |f| f(e);
                     if (!self.handleEvent(e)) return .quit;
                 }
@@ -523,12 +528,20 @@ pub const Host = struct {
     pub fn presentTarget(self: *Host) void {
         if (self.target) |t| _ = kx.kx_present(self.ctx, t);
     }
+
+    /// Traduction avec la taille fenêtre courante (coords finger 0..1 → px).
+    fn translate(self: *const Host, ev: sdl.SDL_Event) ?Event {
+        var pw: c_int = 0;
+        var ph: c_int = 0;
+        _ = sdl.SDL_GetWindowSizeInPixels(self.win, &pw, &ph);
+        return translateRaw(ev, self.winToUi(), @floatFromInt(pw), @floatFromInt(ph));
+    }
 };
 
 /// ptr_scale = px/points (self.scale) — iOS SDL donne les coords souris en
 /// points logiques alors que le canvas/hit-test travaille en pixels device
 /// (@3x → facteur 3). Desktop 1× → identité.
-fn translate(ev: sdl.SDL_Event, ptr_scale: f32) ?Event {
+fn translateRaw(ev: sdl.SDL_Event, ptr_scale: f32, win_pw: f32, win_ph: f32) ?Event {
     return switch (ev.type) {
         sdl.SDL_EVENT_QUIT => .quit,
         // retina/HiDPI : taille PIXELS peut changer sans event RESIZED ;
@@ -556,6 +569,14 @@ fn translate(ev: sdl.SDL_Event, ptr_scale: f32) ?Event {
         sdl.SDL_EVENT_MOUSE_BUTTON_UP => .{ .pointer_up = .{ .x = ev.button.x * ptr_scale, .y = ev.button.y * ptr_scale, .button = ev.button.button } },
         sdl.SDL_EVENT_MOUSE_MOTION => .{ .pointer_move = .{ .x = ev.motion.x * ptr_scale, .y = ev.motion.y * ptr_scale } },
         sdl.SDL_EVENT_MOUSE_WHEEL => .{ .wheel = .{ .dx = ev.wheel.x, .dy = ev.wheel.y, .x = ev.wheel.mouse_x * ptr_scale, .y = ev.wheel.mouse_y * ptr_scale } },
+        // tactile Android (synthèse souris off) : coords normalisés 0..1
+        // de la fenêtre → px → ui. CANCELED se traite comme un up (release).
+        sdl.SDL_EVENT_FINGER_DOWN => .{ .pointer_down = .{
+            .x = ev.tfinger.x * win_pw * ptr_scale, .y = ev.tfinger.y * win_ph * ptr_scale, .button = 1 } },
+        sdl.SDL_EVENT_FINGER_UP, sdl.SDL_EVENT_FINGER_CANCELED => .{ .pointer_up = .{
+            .x = ev.tfinger.x * win_pw * ptr_scale, .y = ev.tfinger.y * win_ph * ptr_scale, .button = 1 } },
+        sdl.SDL_EVENT_FINGER_MOTION => .{ .pointer_move = .{
+            .x = ev.tfinger.x * win_pw * ptr_scale, .y = ev.tfinger.y * win_ph * ptr_scale } },
         else => null,
     };
 }
