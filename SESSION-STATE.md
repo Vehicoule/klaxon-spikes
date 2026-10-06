@@ -646,3 +646,5 @@ BUILD-PROFILE.md) mesurée par device.sh.
 - v1.3-slim livrée par enfant Android : 11,39 Mio, sha256 6eb38947…45bd, cert 0301d4a0, arm64-only ; `SDL_GetAndroidExternalStoragePath` exportée par libSDL3 allégé (nm -D confirmé) ; preuve runtime kx36 : `adb shell cat /sdcard/…/vehicoule.json` complet sans run-as.
 - Bug attrapé avant crash user : `SDL_GetAndroidExternalStoragePath` retourne un buffer STATIQUE SDL → `SDL_free` dessus = free-of-static ; retiré (d0ad171). APK v1.3 OK (impl. enfant sans free).
 - Repo : default=main (flippé user), devin/baseline-import + devin/work supprimées, une seule branche.
+- v1.4 (à venir) : emitStats() périodique (240 ticks) + à la sortie — app qui ne quitte jamais sur retail produisait zéro stats → tout BLOCKED. device.sh : fallback logcat (`logcat -c` avant lancement, grep '"tool":"') quand le fichier externe est vide. Compile Linux + cross arm64 OK.
+- Findings UX retail (user) : forte latence au tap, restart après pause difficile, autoplay opaque. Hypothèses : thread moteur bloque le main, resume échoue silencieusement — à trancher avec stats live v1.4/logcat.

@@ -130,6 +130,7 @@ const G = struct {
     sem_dirty: bool = true,
     running: bool = true,
     frames: i64 = 0,
+    ticks: i64 = 0,
     max_frames: i64 = -1,
     deadline_ms: i64 = -1,
     dirty_extra: bool = true,
@@ -533,6 +534,9 @@ fn draw(h: *k.Host) void {
 }
 
 fn tick() void {
+    g.ticks += 1;
+    // retail : l'app peut ne jamais quitter → stats périodiques
+    if (@mod(g.ticks, 240) == 0) emitStats();
     if (g.deadline_ms > 0 and nowMs() >= g.deadline_ms) {
         g.running = false;
         return;
@@ -654,6 +658,43 @@ fn tick() void {
         },
         .quit => g.running = false,
         .idle => {},
+    }
+}
+
+/// Émet la ligne stats JSON (stderr + fichier externe sur mobile).
+/// Appelée périodiquement pendant le run ET à la sortie — sur retail
+/// l'app peut ne jamais quitter, donc on ne dépend pas du teardown.
+fn emitStats() void {
+    var sbuf: [640]u8 = undefined;
+    const line = std.fmt.bufPrint(&sbuf,
+        "{{\"tool\":\"vehicoule-v0\",\"backend\":\"{s}\",\"driver\":\"{s}\",\"frames\":{},\"avg_ms\":{d:.3},\"p99_ms\":{d:.3},\"pacing_p99_ms\":{d:.3},\"first_frame_ms\":{d:.3},\"ttff_ms\":{d:.3},\"tracks\":{},\"state\":\"{s}\",\"pos\":{d:.1},\"fed\":{},\"queued\":{},\"media_cmds\":{},\"peak_rss_mb\":{d:.1}}}\n",
+        .{ @tagName(g.host.backend()), g.host.driverInfo(),
+           g.host.stats.frames, g.host.stats.avgFrameMs(), g.host.stats.p99FrameMs(),
+           g.host.stats.p99IntervalMs(),
+           g.host.stats.first_frame_ms, g.host.stats.ttff_ms, g.queue.len(),
+           @tagName(g.engine.state), @as(f64, @floatFromInt(g.engine.positionUs())) / 1e6,
+           g.engine.fed_frames, g.engine.queuedBytes(), g.media_cmds,
+           @as(f64, @floatFromInt(k.Stats.peakRssKb())) / 1024.0 }) catch "";
+    std.debug.print("{s}", .{line});
+    if (comptime is_mobile) { // stderr invisible → stats via fichier sandbox
+        var pbuf: [1024]u8 = undefined;
+        const stats_path: [:0]const u8 = if (comptime is_android) blk: {
+            // dossier externe privé de l'app : pas de permission, lisible
+            // par adb shell sur retail (run-as refuse hors userdebug).
+            // retour = buffer statique SDL (s_AndroidExternalFilesPath) — ne pas free.
+            const ext = SDL_GetAndroidExternalStoragePath() orelse break :blk "";
+            break :blk std.fmt.bufPrintSentinel(&pbuf,
+                "{s}/vehicoule.json", .{std.mem.span(ext)}, 0) catch "";
+        } else blk: {
+            const home: [*:0]const u8 = std.c.getenv("HOME") orelse break :blk "";
+            break :blk std.fmt.bufPrintSentinel(&pbuf,
+                "{s}/Documents/vehicoule.json", .{std.mem.span(home)}, 0) catch "";
+        };
+        if (stats_path.len > 0)
+            if (fopen(stats_path, "w")) |f| {
+                _ = fwrite(line.ptr, 1, line.len, f);
+                _ = fclose(f);
+            };
     }
 }
 
@@ -846,37 +887,7 @@ fn runApp(init: std.process.Init) !void {
 
     while (g.running) tick();
 
-    var sbuf: [640]u8 = undefined;
-    const line = std.fmt.bufPrint(&sbuf,
-        "{{\"tool\":\"vehicoule-v0\",\"backend\":\"{s}\",\"driver\":\"{s}\",\"frames\":{},\"avg_ms\":{d:.3},\"p99_ms\":{d:.3},\"pacing_p99_ms\":{d:.3},\"first_frame_ms\":{d:.3},\"ttff_ms\":{d:.3},\"tracks\":{},\"state\":\"{s}\",\"pos\":{d:.1},\"fed\":{},\"queued\":{},\"media_cmds\":{},\"peak_rss_mb\":{d:.1}}}\n",
-        .{ @tagName(g.host.backend()), g.host.driverInfo(),
-           g.host.stats.frames, g.host.stats.avgFrameMs(), g.host.stats.p99FrameMs(),
-           g.host.stats.p99IntervalMs(),
-           g.host.stats.first_frame_ms, g.host.stats.ttff_ms, g.queue.len(),
-           @tagName(g.engine.state), @as(f64, @floatFromInt(g.engine.positionUs())) / 1e6,
-           g.engine.fed_frames, g.engine.queuedBytes(), g.media_cmds,
-           @as(f64, @floatFromInt(k.Stats.peakRssKb())) / 1024.0 }) catch "";
-    std.debug.print("{s}", .{line});
-    if (comptime is_mobile) { // stderr invisible → stats via fichier sandbox
-        var pbuf: [1024]u8 = undefined;
-        const stats_path: [:0]const u8 = if (comptime is_android) blk: {
-            // dossier externe privé de l'app : pas de permission, lisible
-            // par adb shell sur retail (run-as refuse hors userdebug).
-            // retour = buffer statique SDL (s_AndroidExternalFilesPath) — ne pas free.
-            const ext = SDL_GetAndroidExternalStoragePath() orelse break :blk "";
-            break :blk std.fmt.bufPrintSentinel(&pbuf,
-                "{s}/vehicoule.json", .{std.mem.span(ext)}, 0) catch "";
-        } else blk: {
-            const home: [*:0]const u8 = std.c.getenv("HOME") orelse break :blk "";
-            break :blk std.fmt.bufPrintSentinel(&pbuf,
-                "{s}/Documents/vehicoule.json", .{std.mem.span(home)}, 0) catch "";
-        };
-        if (stats_path.len > 0)
-            if (fopen(stats_path, "w")) |f| {
-                _ = fwrite(line.ptr, 1, line.len, f);
-                _ = fclose(f);
-            };
-    }
+    emitStats();
     g.engine.close();
     if (g.scan_json) |sj| g.alloc.free(sj);
     g.queue.deinit(g.alloc);

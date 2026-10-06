@@ -71,10 +71,13 @@ fi
 run_scene() { # nom, kx_args, fichier stats → JSON ligne (ou vide)
     # stats écrits dans le dossier externe privé (sdcard) depuis v1.3 —
     # lisible via adb shell sur retail, sans run-as.
+    # Depuis v1.4 l'app émet les stats périodiquement (pas seulement à la
+    # sortie) et stderr est relayé dans logcat → fallback logcat ci-dessous.
     local name="$1" args="$2" stats="$3"
     local sp="/sdcard/Android/data/$PKG/files/$stats"
     $ADB shell rm -f "$sp" 2>/dev/null
     $ADB shell am force-stop "$PKG"
+    $ADB logcat -c 2>/dev/null
     # -W : attend l'activité affichée → WaitTime ≈ tap-icon→1re frame,
     # complément OS au ttff_ms in-app (process spawn compris).
     local start_out wait_ms total_ms
@@ -85,6 +88,12 @@ run_scene() { # nom, kx_args, fichier stats → JSON ligne (ou vide)
         sleep 2
         local j
         j=$($ADB shell "cat $sp 2>/dev/null" | tr -d '\r' | tail -1)
+        case "$j" in \{*) ;; *)
+            # fichier pas encore écrit → fallback logcat (stderr de l'app,
+            # marche sur retail même si le path externe est inaccessible)
+            j=$($ADB logcat -d 2>/dev/null | grep '"tool":"' | tail -1 |
+                 sed -n 's/.*\({.*}\)/\1/p')
+        ;; esac
         case "$j" in \{*)
             # injecte la latence de lancement OS dans le résultat
             j="${j#\{}"
