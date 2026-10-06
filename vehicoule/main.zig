@@ -697,9 +697,10 @@ fn tick() void {
 /// Appelée périodiquement pendant le run ET à la sortie — sur retail
 /// l'app peut ne jamais quitter, donc on ne dépend pas du teardown.
 fn emitStats() void {
-    var sbuf: [640]u8 = undefined;
-    const line = std.fmt.bufPrint(&sbuf,
-        "{{\"tool\":\"vehicoule-v0\",\"backend\":\"{s}\",\"driver\":\"{s}\",\"frames\":{},\"avg_ms\":{d:.3},\"p99_ms\":{d:.3},\"pacing_p99_ms\":{d:.3},\"first_frame_ms\":{d:.3},\"ttff_ms\":{d:.3},\"tracks\":{},\"state\":\"{s}\",\"pos\":{d:.1},\"fed\":{},\"queued\":{},\"media_cmds\":{},\"ev\":[{},{},{}],\"hits\":{},\"peak_rss_mb\":{d:.1}}}\n",
+    var sbuf: [1664]u8 = undefined;
+    var off: usize = 0;
+    const head = std.fmt.bufPrint(sbuf[off..],
+        "{{\"tool\":\"vehicoule-v0\",\"backend\":\"{s}\",\"driver\":\"{s}\",\"frames\":{},\"avg_ms\":{d:.3},\"p99_ms\":{d:.3},\"pacing_p99_ms\":{d:.3},\"first_frame_ms\":{d:.3},\"ttff_ms\":{d:.3},\"tracks\":{},\"state\":\"{s}\",\"pos\":{d:.1},\"fed\":{},\"queued\":{},\"media_cmds\":{},\"ev\":[{},{},{}],\"hits\":{},\"peak_rss_mb\":{d:.1},\"rss\":{{",
         .{ @tagName(g.host.backend()), g.host.driverInfo(),
            g.host.stats.frames, g.host.stats.avgFrameMs(), g.host.stats.p99FrameMs(),
            g.host.stats.p99IntervalMs(),
@@ -708,6 +709,17 @@ fn emitStats() void {
            g.engine.fed_frames, g.engine.queuedBytes(), g.media_cmds,
            g.ev_down, g.ev_up, g.ev_move, g.hits,
            @as(f64, @floatFromInt(k.Stats.peakRssKb())) / 1024.0 }) catch "";
+    off += head.len;
+    // Ledger : pic cumulatif par étage d'init (delta entre marques = coût
+    // de l'étage) — attribution du RSS retail exigée par le plan v19.
+    for (k.rssLedger(), 0..) |m, i| {
+        const part = std.fmt.bufPrint(sbuf[off..], "{s}\"{s}\":{d:.1}",
+            .{ if (i == 0) "" else ",", m.label, @as(f64, @floatFromInt(m.kb)) / 1024.0 }) catch break;
+        off += part.len;
+    }
+    const tail = std.fmt.bufPrint(sbuf[off..], "}}}}\n", .{}) catch "";
+    off += tail.len;
+    const line = sbuf[0..off];
     std.debug.print("{s}", .{line});
     if (comptime is_mobile) { // stderr invisible → stats via fichier sandbox
         var pbuf: [1024]u8 = undefined;
@@ -756,6 +768,7 @@ fn setup(font_data: []const u8) !void {
     else
         try k.Host.initGlWindow(g.io, "Vehicoule", 900, 640);
     _ = kx.kx_fonts_add(g.host.fonts, font_data.ptr, @intCast(font_data.len));
+    k.rssMark("fonts");
 
     g.p_bg = mkPaint(ui.theme.bg);
     g.p_card = mkPaint(ui.theme.surface);
@@ -845,6 +858,7 @@ fn setup(font_data: []const u8) !void {
     if (comptime is_mobile) kx_media_set_action_handler(mediaCmdCb, null);
     // le bouton play est l'action principale → label AT
     g.root.semantics = .{ .label = "Vehicoule" };
+    k.rssMark("scene");
 }
 
 fn runApp(init: std.process.Init) !void {

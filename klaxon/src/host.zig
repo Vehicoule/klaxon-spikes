@@ -84,6 +84,26 @@ pub const Stats = struct {
     }
 };
 
+/// Ledger RSS par étage d'init (ru_maxrss = pic cumulatif → chaque marque
+/// est un plancher ; le delta entre deux marques = coût de l'étage). Le v19
+/// exige l'attribution des ~213 Mo retail : plancher Skia+driver vs delta app.
+pub const RssMark = struct { label: []const u8, kb: isize };
+var rss_marks: [12]RssMark = undefined;
+var rss_n: usize = 0;
+/// Vide le ledger — appelé en tête de chaque init* (un fallback recrée tout).
+pub fn rssReset() void {
+    rss_n = 0;
+}
+pub fn rssMark(comptime label: []const u8) void {
+    if (rss_n < rss_marks.len) {
+        rss_marks[rss_n] = .{ .label = label, .kb = @intCast(Stats.peakRssKb()) };
+        rss_n += 1;
+    }
+}
+pub fn rssLedger() []const RssMark {
+    return rss_marks[0..rss_n];
+}
+
 // Le get_proc masque "egl*" : sous GLX (display EGL absente), Skia
 // appellerait eglQueryString(EGL_NO_DISPLAY) et déréférencerait NULL
 // dans GrGLExtensions::init (piège mesuré dans K1). Sur Android/EGL réel,
@@ -136,7 +156,9 @@ pub const Host = struct {
             // tactile traduit par nous (FINGER_*) — la synthèse souris de
             // SDL peut perdre le BUTTON_UP sur retail (clics morts mesurés).
             _ = sdl.SDL_SetHint(sdl.SDL_HINT_TOUCH_MOUSE_EVENTS, "0");
+        rssReset();
         if (!sdl.SDL_Init(sdl.SDL_INIT_VIDEO)) return error.SdlInit;
+        rssMark("sdl");
         if (comptime is_android) {
             // Android : ES3 + stencil (clips Skia) + fullscreen implicite.
             _ = sdl.SDL_GL_SetAttribute(sdl.SDL_GL_CONTEXT_PROFILE_MASK, sdl.SDL_GL_CONTEXT_PROFILE_ES);
@@ -151,14 +173,17 @@ pub const Host = struct {
             sdl.SDL_WINDOW_HIGH_PIXEL_DENSITY |
             (if (comptime is_android) sdl.SDL_WINDOW_FULLSCREEN else 0);
         const win = sdl.SDL_CreateWindow(title, w, h, flags) orelse return error.NoWindow;
+        rssMark("win");
         const gl = sdl.SDL_GL_CreateContext(win) orelse return error.NoGL;
         _ = sdl.SDL_GL_MakeCurrent(win, gl);
         _ = sdl.SDL_GL_SetSwapInterval(1);
         const ctx = kx.kx_ctx_create_ganesh_gl_current(glGetProc) orelse return error.NoKx;
+        rssMark("ctx");
         var pw: c_int = 0;
         var ph: c_int = 0;
         _ = sdl.SDL_GetWindowSizeInPixels(win, &pw, &ph);
         const tgt = kx.kx_target_onscreen_gl(ctx, pw, ph) orelse return error.NoTarget;
+        rssMark("tgt");
         var hwnd: ?*anyopaque = null;
         if (comptime builtin.os.tag == .windows) {
             hwnd = sdl.SDL_GetPointerProperty(sdl.SDL_GetWindowProperties(win),
@@ -189,7 +214,9 @@ pub const Host = struct {
         if (comptime !is_android) return error.Unsupported;
         const t0 = nowUs(io);
         _ = sdl.SDL_SetHint(sdl.SDL_HINT_TOUCH_MOUSE_EVENTS, "0"); // idem GL
+        rssReset();
         if (!sdl.SDL_Init(sdl.SDL_INIT_VIDEO)) return error.SdlInit;
+        rssMark("sdl");
         vk: {
             // LoadLibrary échoue tôt si le driver Vulkan est absent — SDL
             // vérifie aussi VK_KHR_surface/android_surface disponibles.
@@ -203,11 +230,13 @@ pub const Host = struct {
                 sdl.SDL_Log("kx-vk: SDL_CreateWindow vulkan a échoué");
                 break :vk;
             };
+            rssMark("win");
             const ctx = kx.kx_ctx_create_graphite_vulkan() orelse {
                 sdl.SDL_Log("kx-vk: kx_ctx_create_graphite_vulkan null");
                 sdl.SDL_DestroyWindow(win);
                 break :vk;
             };
+            rssMark("ctx");
             var surface: ?*anyopaque = null;
             const inst = kx.kx_ctx_vk_instance(ctx);
             if (inst == null or
@@ -217,6 +246,7 @@ pub const Host = struct {
                 sdl.SDL_DestroyWindow(win);
                 break :vk;
             }
+            rssMark("surface");
             var pw: c_int = 0;
             var ph: c_int = 0;
             _ = sdl.SDL_GetWindowSizeInPixels(win, &pw, &ph);
@@ -226,6 +256,7 @@ pub const Host = struct {
                 sdl.SDL_DestroyWindow(win);
                 break :vk;
             };
+            rssMark("tgt");
             var host: Host = .{
                 .win = win, .gl = null, .mode = .vulkan, .ctx = ctx,
                 .fonts = kx.kx_fonts_global(), .target = tgt, .io = io,
@@ -245,17 +276,22 @@ pub const Host = struct {
     pub fn initMetalWindow(io: std.Io, title: [*c]const u8, w: c_int, h: c_int) !Host {
         if (comptime builtin.os.tag == .macos or builtin.os.tag == .ios) {
             const t0 = nowUs(io);
+            rssReset();
             if (!sdl.SDL_Init(sdl.SDL_INIT_VIDEO)) return error.SdlInit;
+            rssMark("sdl");
             const win = sdl.SDL_CreateWindow(title, w, h, sdl.SDL_WINDOW_METAL |
                 sdl.SDL_WINDOW_RESIZABLE | sdl.SDL_WINDOW_HIGH_PIXEL_DENSITY) orelse return error.NoWindow;
+            rssMark("win");
             const view = sdl.SDL_Metal_CreateView(win) orelse return error.NoMetalView;
             const ctx = kx.kx_ctx_create_graphite_metal() orelse return error.NoKx;
+            rssMark("ctx");
             var host: Host = .{
                 .win = win, .gl = null, .view = view, .mode = .metal, .ctx = ctx,
                 .fonts = kx.kx_fonts_global(), .target = null, .io = io,
                 .boot_t0_us = t0,
             };
             _ = host.makeMetalTarget() orelse return error.NoTarget;
+            rssMark("tgt");
             // Text input activé dès l'init (IME/macOS compose inline).
             _ = sdl.SDL_StartTextInput(win);
             // Hit-test AX : class_addMethod sur SDL_MetalView si la classe
