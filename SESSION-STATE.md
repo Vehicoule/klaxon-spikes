@@ -658,3 +658,8 @@ BUILD-PROFILE.md) mesurée par device.sh.
 - APK v1.5 (enfant) : 12,6 Mo, backend réel "graphite_vulkan" prouvé émulateur + fallback cassé-VK→ganesh prouvé. Mesures ém non extrapolables — attendre Adreno.
 - device.sh retail enfin vert-de-fonction : v1.5 sur Adreno sort ttff/rss/apk PASS + vraies stats. ANOMALIE : graphite_vulkan 76ms avg/p99 (≈13fps) vs ganesh 11-15ms (60fps) sur même device — écart ×5-6 (émulateur montrait ×1.8). fed:0/state idle → autoplay n'a pas démarré (queue vide probable ou timing scan). Chrome Android = graphite-vulkan prod → c'est nous, pas le backend. Enfant Android → v1.6 instrumentation KX_VK_DEBUG (acquire/record/submit/present breakdown) + log autoplay-queue-vide.
 - Suspects perf graphite-Adreno : swapchain minImageCount+1/FIFO acquire-bloc, WrapBackendTexture format/tiling Adreno, sampleCount surfaceProps. ttff 150ms = coût init vk (one-shot, acceptable).
+- v16 retail : frame-breakdown manquant = app idle (pas d'autoplay → <120 présents) ; swapchain imgs=5 usage=0x90 OK.
+- VERDICTS JSON retail : Graphite = avg 7.0-7.5ms/p99 10.6ms sur 400-665 frames (~135fps avg, ≥95fps p99) — quasi target 120, 2× ganesh. Le "76ms" précédent = artefact (1 frame froide idle).
+- Bug clics ROOT-CAUSE : ev[34,1,1] = BUTTON_UP synthèse tactile→souris SDL perdus sur retail → fix = SDL_TOUCH_MOUSE_EVENTS=0 + FINGER_* directs (8e3139d).
+- Autoplay-scène cassé par quoting `'$args'` (quotes collées aux args extrêmes après split(" ")) → reverté ; autoplay jamais vu = state:idle+feds:0 expliqués.
+- Prochaine mesure : v1.7 APK + touch marker + scène autoplay → gates réels graphite-Adreno.
