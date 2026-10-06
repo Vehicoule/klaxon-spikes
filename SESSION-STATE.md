@@ -626,3 +626,12 @@ BUILD-PROFILE.md) mesurée par device.sh.
 - Enfant Android redispatché : APK slim arm64-only cible <12 Mo + SDL3 allégé.
 - WATCH ITEM ajouté : les fixtures embarquées = contenu DÉMO, pas le fix de bibliothèque vide — le vrai scanner de musique utilisateur passe par MediaStore/SAF + READ_MEDIA_AUDIO (Android 13+) — à planifier V1.x/V2.
 - WATCH ITEM (v18) : RSS ~310 Mo sim-Metal = à isoler par ledger (plancher renderer/driver vs delta Klaxon), aucun seuil calibré dessus ; TTFF 131 ms software → réarmer plus serré (<100 ms ?) après mesure device.
+
+## 2026-10-06 — V1.2-slim : APK 11,93 Mo < 12 (cible v13 atteinte)
+- Enfant Android : `vehicoule-v1.2-slim-arm64.apk` 11,93 Mo post-zipalign (arm64 seul, même cert). Décomp : libmain 8,59 + libSDL3 1,95 (sdlTrim cmake) + fixtures 1,32 + 0,15.
+- Mergé : SDLActivity stub HIDDeviceManager (try/catch → null), build_veh ARM64_ONLY=1 → -PARM64_ONLY ; canonisé `platform/android/build.gradle.kx` (sdlTrim + kxAbis) + `patches/sdl-android-hidapi-guard.patch` (SDL_HIDAPI=OFF casse le link — combinaison non gatée upstream) + doc v1.2.
+- Vérif honnête : arm64 = preuves statiques ; même trim exécuté sur dev dual-ABI ému kx36 (tracks:8, fed:94208 — audio/video/events/IME intacts). ttff 777 ms ému cold-cache (non représentatif device).
+- Piège : padding inter-entrées ~5 Mo avant zipalign → toujours peser post-zipalign.
+- Gate APK : v1.2 passe la gate provisoire <25 ET la vraie gate v13 <12.
+- Levier suivant si North Star <8 : libmain.so (Skia .a + décodeurs) — LTO/ICU-trim.
+- Branches : devin/work fusionné dans main + supprimée ; baseline-import reste default (flip manuel user requis pour suppression).

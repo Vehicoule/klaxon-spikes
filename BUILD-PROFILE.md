@@ -90,6 +90,18 @@ Lecture : le poids = les 2 ABI. Chemin vers la gate <12 Mo :
 SDL3 allégé ou ICU-trim pour passer sous la barre. La v1.1 fixtures-2s
 projetée dual-ABI ≈ 25,5 Mo ; l'arm64-only ≈ **12,3 Mo**.
 
+**v1.2-slim livré — 11,93 Mo, cible <12 atteinte** (mesuré, post-zipalign) :
+libmain 8,59 + **libSDL3 1,95** (3,33→1,95 via `sdlTrim` : CAMERA/RENDER/
+GPU/JOYSTICK/HAPTIC/HIDAPI/POWER/SENSOR/DIALOG/OPENGL/VULKAN/DUMMY*/
+OFFSCREEN OFF — audio/video/events/touch/IME/GLES gardés) + fixtures 1,32
++ dex/res 0,15. Deux breaks réels : `SDL_HIDAPI=OFF` casse le link SDL3
+non gaté upstream (patch `platform/android/patches/`) + stub
+`HIDDeviceManager.acquire()` try/catch dans SDLActivity. Vérif exécution
+sur dev dual-ABI ému : tracks:8, playing, fed:94208 — trim sans casse.
+Piège : peser post-zipalign (padding inter-entrées ~5 Mo avant).
+Poste restant : libmain.so (Skia .a + décodeurs) → prochain levier
+LTO/ICU-trim si visée <8 (North Star).
+
 ## 3. Leviers rangés par gain/effort (ordre d'attaque)
 
 1. **ReleaseSmall** — zig obj 6,7→1,2 Mo, déjà applicable.

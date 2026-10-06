@@ -461,7 +461,14 @@ public class SDLActivity extends Activity implements View.OnSystemUiVisibilityCh
 
         mClipboardHandler = new SDLClipboardHandler();
 
-        mHIDDeviceManager = HIDDeviceManager.acquire(this);
+        try {
+            mHIDDeviceManager = HIDDeviceManager.acquire(this);
+        } catch (Throwable t) {
+            // SDL_HIDAPI=OFF : natives absents — joystick/GameController
+            // désactivés de toute façon, on continue sans.
+            Log.w(TAG, "HIDDeviceManager unavailable (HIDAPI off): " + t);
+            mHIDDeviceManager = null;
+        }
 
         // Set up the surface
         mSurface = createSDLSurface(this);
