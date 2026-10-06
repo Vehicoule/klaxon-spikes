@@ -651,3 +651,4 @@ BUILD-PROFILE.md) mesurée par device.sh.
 - device.sh v2 : install non masquée + échec explicite (popup MIUI « Installer via USB » = vieille APK qui tourne → BLOCKED), poll accumule dernière émission jusqu'à frames≥390 ou process mort.
 - PREMIERS CHIFFRES HARDWARE (user, Xiaomi 23127PN0CG, Adreno 750 ganesh-gles) : ttff 42,2 ms (cible <200 explosée ×5), avg 12-15 ms, p99 17-19 ms, RSS ~200 Mo, audio confirmé (fed/state:playing). pacing_p99 344-2914 = bruit idle-throttle, à exclure des gaps d'idle.
 - Findings UX confirmés : clics buggés sur retail, audio OK.
+- Question user « pourquoi Ganesh » : Android ship = ganesh-GLES volontaire (host.zig ganesh_gl_current en dur) — Graphite-Vulkan prouvé qu'en ém via SwiftShader, jamais contre un driver réel. Spike graphite-vulkan sur Adreno réel (sdk36) = piste ouverte, chiffres déjà bons sous GLES.
